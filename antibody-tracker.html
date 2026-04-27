@@ -1,0 +1,1374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jackson Lab — Antibody Tracker</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3350;
+    --accent: #4f8ef7;
+    --green: #2ecc71;
+    --red: #e74c3c;
+    --yellow: #f1c40f;
+    --text: #e8ecf4;
+    --muted: #8890aa;
+    --tag-bg: #263050;
+    --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  header {
+    background: linear-gradient(135deg, #161929 0%, #1e2340 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 18px 32px; display: flex; align-items: center; gap: 20px;
+    position: sticky; top: 0; z-index: 200; box-shadow: var(--shadow);
+  }
+  .lab-logo { font-size: 28px; }
+  .header-text h1 { font-size: 1.35rem; font-weight: 700; }
+  .header-text p { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+  .header-stats { margin-left: auto; display: flex; gap: 24px; }
+  .stat { text-align: center; }
+  .stat-num { font-size: 1.4rem; font-weight: 700; color: var(--accent); }
+  .stat-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+  .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); padding: 0 32px; }
+  .tab { padding: 13px 22px; cursor: pointer; font-size: 0.88rem; font-weight: 500; color: var(--muted); border-bottom: 3px solid transparent; transition: all 0.2s; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .controls {
+    padding: 14px 32px; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  }
+  .search-wrap { position: relative; flex: 1; min-width: 200px; max-width: 340px; }
+  .search-wrap input {
+    width: 100%; padding: 8px 12px 8px 34px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-size: 0.86rem; outline: none; transition: border-color 0.2s;
+  }
+  .search-wrap input:focus { border-color: var(--accent); }
+  .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 13px; }
+  select {
+    padding: 8px 11px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-size: 0.86rem; outline: none; cursor: pointer;
+  }
+  select:focus { border-color: var(--accent); }
+  .btn {
+    padding: 8px 15px; border-radius: 8px; font-size: 0.83rem; font-weight: 500;
+    cursor: pointer; border: 1px solid var(--border); background: var(--surface2);
+    color: var(--text); transition: all 0.2s; white-space: nowrap;
+  }
+  .btn:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-green { background: #1a3a25; border-color: #1e5030; color: #4dcb7a; }
+  .btn-green:hover { background: #2ecc71; border-color: #2ecc71; color: #000; }
+  .btn-red { background: #3a1a1a; border-color: #601a1a; color: #f55a5a; }
+  .btn-red:hover { background: var(--red); border-color: var(--red); color: #fff; }
+  .btn-yellow { background: #3a2e1a; border-color: #60481a; color: #f7c94e; }
+  .btn-yellow:hover { background: #f39c12; border-color: #f39c12; color: #000; }
+  .count-badge { margin-left: auto; font-size: 0.8rem; color: var(--muted); }
+
+  .table-wrap { padding: 20px 32px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+  thead tr { background: var(--surface2); }
+  th {
+    padding: 11px 13px; text-align: left; font-size: 0.73rem; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;
+    border-bottom: 1px solid var(--border); white-space: nowrap; cursor: pointer; user-select: none;
+  }
+  th:hover { color: var(--accent); }
+  th.sorted .sort-icon { color: var(--accent); }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.12s; }
+  tbody tr:hover { background: var(--surface2); }
+  td { padding: 10px 13px; vertical-align: middle; }
+  td.target-cell { font-weight: 600; }
+  td.code-cell { font-family: monospace; font-size: 0.8rem; color: var(--muted); }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 0.7rem; font-weight: 600; }
+  .badge-host { background: #1e3a5f; color: #7ab8f5; }
+  .badge-pre  { background: #1a3a2a; color: #5ecb87; }
+  .badge-post { background: #2a1a3a; color: #b98cf7; }
+  .badge-inhib{ background: #3a2a1a; color: #f7a85e; }
+  .badge-excit{ background: #1a2a3a; color: #5ec4f7; }
+  .badge-astro{ background: #1a3a3a; color: #5ef7e8; }
+  .badge-pan  { background: #3a1a3a; color: #f75ee8; }
+  .badge-other{ background: #2e3350; color: #8890aa; }
+
+  .use-tag { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; margin: 1px; }
+  .use-IF  { background: #1a2e4a; color: #5aade0; border: 1px solid #1e4070; }
+  .use-WB  { background: #1a3a25; color: #4dcb7a; border: 1px solid #1e5030; }
+  .use-IMC { background: #3a1a3a; color: #cc7af5; border: 1px solid #5a1a7a; }
+  .use-IHC { background: #2e2a1a; color: #d4b85a; border: 1px solid #504020; }
+  .use-FC  { background: #1e2e3a; color: #7ad0f0; border: 1px solid #1a4060; }
+  .use-bad { background: #3a1a1a; color: #f55a5a; border: 1px solid #601a1a; }
+
+  .storage-4  { color: #5ab8f7; font-size: 0.78rem; }
+  .storage-20 { color: #b88cf7; font-size: 0.78rem; }
+  .notes-warn { color: var(--red); font-weight: 600; font-size: 0.78rem; }
+  .notes-info { color: var(--yellow); font-size: 0.78rem; }
+  .notes-cell { max-width: 180px; font-size: 0.76rem; color: var(--muted); }
+
+  .link-btn {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 2px 7px; border-radius: 5px; font-size: 0.72rem;
+    background: var(--tag-bg); color: var(--accent); border: 1px solid #2e3a60;
+    text-decoration: none; transition: background 0.2s;
+  }
+  .link-btn:hover { background: #263860; }
+
+  /* ROW ACTION BUTTONS */
+  .row-actions { display: flex; gap: 4px; }
+  .icon-btn {
+    background: none; border: 1px solid var(--border); border-radius: 5px;
+    color: var(--muted); cursor: pointer; padding: 3px 7px; font-size: 0.75rem;
+    transition: all 0.15s;
+  }
+  .icon-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--surface2); }
+  .icon-btn.del:hover { border-color: var(--red); color: var(--red); }
+
+  /* MODAL */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    z-index: 500; align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 28px 32px; width: 90%; max-width: 680px; max-height: 90vh;
+    overflow-y: auto; box-shadow: 0 8px 48px rgba(0,0,0,0.6);
+    animation: slideIn 0.2s ease;
+  }
+  @keyframes slideIn { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .modal h2 { font-size: 1.05rem; font-weight: 700; margin-bottom: 20px; color: var(--text); }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+  .form-group.full { grid-column: 1 / -1; }
+  .form-group label { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .form-group input, .form-group select, .form-group textarea {
+    padding: 8px 11px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 7px; color: var(--text); font-size: 0.86rem; outline: none;
+    font-family: inherit; transition: border-color 0.2s;
+  }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--accent); }
+  .form-group textarea { resize: vertical; min-height: 60px; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+
+  /* STORAGE MAP */
+  .map-section { padding: 22px 32px; }
+  .map-block { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 22px; margin-bottom: 26px; overflow-x: auto; }
+  .map-block-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .map-title-input {
+    background: none; border: none; border-bottom: 1px dashed var(--border);
+    color: var(--text); font-size: 0.96rem; font-weight: 600; outline: none;
+    padding: 2px 4px; min-width: 180px; transition: border-color 0.2s;
+  }
+  .map-title-input:focus { border-bottom-color: var(--accent); }
+  .map-subtitle { font-size: 0.76rem; color: var(--muted); }
+  .map-actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+  .box-grid-header { display: flex; gap: 6px; padding-left: 42px; margin-bottom: 4px; }
+  .col-num { width: 104px; text-align: center; font-size: 0.7rem; color: var(--muted); font-weight: 600; }
+  .box-row { display: flex; gap: 6px; align-items: flex-start; margin-bottom: 6px; }
+  .row-label { width: 42px; font-size: 0.76rem; font-weight: 700; color: var(--muted); padding-top: 12px; display: flex; align-items: flex-start; justify-content: center; }
+  .box-cell {
+    width: 104px; min-height: 58px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 6px; font-size: 0.67rem; color: var(--text);
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    line-height: 1.35; transition: all 0.14s; cursor: pointer; position: relative;
+  }
+  .box-cell:hover { border-color: var(--accent); background: #1e2540; transform: scale(1.03); z-index: 1; }
+  .box-cell.empty { background: transparent; border-color: #1e2240; color: #3a3f60; }
+  .box-cell.empty:hover { border-color: var(--accent); background: #1a1d2e; color: var(--muted); }
+  .box-cell .cell-edit-hint { display: none; position: absolute; top: 3px; right: 4px; font-size: 9px; color: var(--accent); opacity: 0.7; }
+  .box-cell:hover .cell-edit-hint { display: block; }
+  .add-col-btn, .add-row-btn {
+    background: transparent; border: 1px dashed #2e3350; border-radius: 6px;
+    color: #3a4060; cursor: pointer; font-size: 0.8rem; transition: all 0.15s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .add-col-btn { width: 32px; min-height: 58px; }
+  .add-col-btn:hover, .add-row-btn:hover { border-color: var(--accent); color: var(--accent); background: #1a1d2e; }
+  .add-row-btn { height: 32px; flex: 1; margin-left: 42px; margin-top: 2px; }
+  .del-row-btn {
+    background: none; border: none; color: #3a2a2a; cursor: pointer; font-size: 11px;
+    padding: 2px 3px; margin-top: 2px; transition: color 0.15s; line-height: 1;
+  }
+  .del-row-btn:hover { color: var(--red); }
+  .add-map-btn { margin: 0 0 20px 0; }
+
+  /* SECONDARY */
+  .fluoro-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+  .f488 { background: #00e676; }
+  .f568 { background: #ff6d00; }
+  .f647 { background: #aa00ff; }
+
+  /* TOAST */
+  .toast {
+    position: fixed; bottom: 28px; right: 28px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 10px; padding: 12px 20px;
+    font-size: 0.86rem; color: var(--text); box-shadow: var(--shadow);
+    z-index: 1000; transform: translateY(80px); opacity: 0;
+    transition: all 0.3s; pointer-events: none;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.success { border-color: #1e5030; color: #4dcb7a; }
+  .toast.error   { border-color: #601a1a; color: #f55a5a; }
+
+  .colour-swatch {
+    width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .colour-swatch:hover { transform: scale(1.15); }
+  .colour-swatch.selected { box-shadow: 0 0 0 2px var(--accent); transform: scale(1.15); }
+
+  .aliquot-cell { display:flex; align-items:center; gap:4px; white-space:nowrap; }
+  .aliquot-count { font-weight:700; min-width:18px; text-align:center; }
+  .aliquot-count.low  { color: var(--yellow); }
+  .aliquot-count.out  { color: var(--red); }
+  .aliquot-count.ok   { color: var(--green); }
+  .aliquot-btn { background:var(--surface2); border:1px solid var(--border); border-radius:4px; color:var(--text); cursor:pointer; font-size:0.75rem; padding:1px 6px; line-height:1.6; transition:all 0.15s; }
+  .aliquot-btn:hover  { background:var(--accent); border-color:var(--accent); }
+  .aliquot-na { color:var(--border); font-size:0.75rem; }
+
+  .empty-state { text-align: center; padding: 50px 20px; color: var(--muted); }
+  .empty-state .icon { font-size: 38px; margin-bottom: 10px; }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  @media (max-width: 768px) {
+    header { flex-wrap: wrap; padding: 12px 16px; }
+    .controls { padding: 10px 16px; }
+    .table-wrap { padding: 10px 16px; }
+    .map-section { padding: 10px 16px; }
+    .form-grid { grid-template-columns: 1fr; }
+    .modal { padding: 20px 18px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- ADD/EDIT MODAL - PRIMARY -->
+<div class="modal-overlay" id="modal-primary">
+  <div class="modal">
+    <h2 id="modal-primary-title">Add Primary Antibody</h2>
+    <div class="form-grid">
+      <div class="form-group"><label>Target *</label><input id="f-target" placeholder="e.g. VGAT"></div>
+      <div class="form-group"><label>Host *</label>
+        <select id="f-host">
+          <option value="">Select…</option>
+          <option>Rabbit</option><option>Mouse</option><option>Guinea Pig</option>
+          <option>Chicken</option><option>Human</option><option>Goat</option><option>Rat</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Tissue / Location</label>
+        <select id="f-tissue">
+          <option value="">Select…</option>
+          <option>Pre-synaptic</option><option>Post-synaptic</option>
+          <option>Inhibitory neuron</option><option>Excitatory neurons</option>
+          <option>Pan-neuronal</option><option>Astrocyte</option>
+          <option>Cytoplasmic</option><option>Cytoskeletal</option>
+          <option>Synaptic</option><option>Housekeeping</option>
+          <option>Adhesion molecule</option><option>Neuronal (inhib)</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Clone</label><input id="f-clone" placeholder="e.g. Polyclonal"></div>
+      <div class="form-group"><label>Company</label><input id="f-company" placeholder="e.g. Abcam"></div>
+      <div class="form-group"><label>Catalogue Code *</label><input id="f-code" placeholder="e.g. ab249939"></div>
+      <div class="form-group"><label>Use(s)</label><input id="f-use" placeholder="e.g. IF, WB, IMC"></div>
+      <div class="form-group"><label>Storage</label>
+        <select id="f-storage">
+          <option value="">Select…</option>
+          <option value="4deg">4°C</option>
+          <option value="-20deg">-20°C</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Storage Modifications</label><input id="f-mod" placeholder="e.g. Aliquoted"></div>
+      <div class="form-group"><label>Aliquot Location</label><input id="f-loc" placeholder="e.g. -20 Freezer"></div>
+      <div class="form-group"><label>Aliquots remaining</label><input id="f-aliquots" type="number" min="0" placeholder="e.g. 8 — leave blank if not tracked"></div>
+      <div class="form-group"><label>WB Dilution</label><input id="f-wb" placeholder="e.g. 1:1000"></div>
+      <div class="form-group"><label>IF Concentration</label><input id="f-ifc" placeholder="e.g. 1:200"></div>
+      <div class="form-group"><label>IMC Concentration</label><input id="f-imc" placeholder="e.g. 1:200"></div>
+      <div class="form-group"><label>Product Link</label><input id="f-link" placeholder="https://…"></div>
+      <div class="form-group full"><label>Notes</label><textarea id="f-notes" placeholder="Any special notes, warnings, lot numbers…"></textarea></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('primary')">Cancel</button>
+      <button class="btn btn-green" onclick="savePrimary()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD/EDIT MODAL - SECONDARY -->
+<div class="modal-overlay" id="modal-secondary">
+  <div class="modal">
+    <h2 id="modal-secondary-title">Add Secondary Antibody</h2>
+    <div class="form-grid">
+      <div class="form-group"><label>Target (raised against) *</label><input id="sf-target" placeholder="e.g. Rabbit"></div>
+      <div class="form-group"><label>Host *</label>
+        <select id="sf-host">
+          <option value="">Select…</option>
+          <option>Donkey</option><option>Goat</option><option>Horse</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Fluorophore (nm) *</label>
+        <select id="sf-fluoro">
+          <option value="">Select…</option>
+          <option>488</option><option>568</option><option>647</option>
+          <option>405</option><option>514</option><option>594</option><option>750</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Clone</label><input id="sf-clone" placeholder="e.g. Polyclonal"></div>
+      <div class="form-group"><label>Company</label><input id="sf-company" placeholder="e.g. ThermoFisher"></div>
+      <div class="form-group"><label>Code</label><input id="sf-code" placeholder="e.g. A32790"></div>
+      <div class="form-group"><label>Storage</label>
+        <select id="sf-storage">
+          <option value="">Select…</option>
+          <option value="4deg">4°C</option><option value="-20deg">-20°C</option>
+        </select>
+      </div>
+      <div class="form-group"><label>WB Dilution</label><input id="sf-wb" placeholder="e.g. 1:2000"></div>
+      <div class="form-group"><label>ICC Dilution</label><input id="sf-icc" placeholder="e.g. 1:500"></div>
+      <div class="form-group"><label>Product Link</label><input id="sf-link" placeholder="https://…"></div>
+      <div class="form-group full"><label>Notes</label><textarea id="sf-notes"></textarea></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('secondary')">Cancel</button>
+      <button class="btn btn-green" onclick="saveSecondary()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- CELL EDIT MODAL -->
+<div class="modal-overlay" id="modal-cell">
+  <div class="modal" style="max-width:420px">
+    <h2 id="modal-cell-title">Edit Cell</h2>
+    <div class="form-grid" style="grid-template-columns:1fr">
+      <div class="form-group">
+        <label>Cell Label</label>
+        <input id="cell-label" placeholder="e.g. VGAT Mouse ab211534 — or leave blank to clear">
+      </div>
+      <div class="form-group">
+        <label>Background colour (optional)</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px" id="cell-colour-swatches">
+          <div class="colour-swatch" data-bg="" data-border="" style="background:var(--surface2);border:1px solid var(--border)" title="Default"></div>
+          <div class="colour-swatch" data-bg="#1a2e1a" data-border="#1e5530" style="background:#1a2e1a;border:1px solid #1e5530" title="Green (488)"></div>
+          <div class="colour-swatch" data-bg="#2e1a1a" data-border="#5a2020" style="background:#2e1a1a;border:1px solid #5a2020" title="Orange (568)"></div>
+          <div class="colour-swatch" data-bg="#2a1a3a" data-border="#5a1a7a" style="background:#2a1a3a;border:1px solid #5a1a7a" title="Purple (647)"></div>
+          <div class="colour-swatch" data-bg="#1a2a3a" data-border="#1e4060" style="background:#1a2a3a;border:1px solid #1e4060" title="Blue"></div>
+          <div class="colour-swatch" data-bg="#3a2a1a" data-border="#60401a" style="background:#3a2a1a;border:1px solid #60401a" title="Amber"></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-red" onclick="clearCell()">Clear cell</button>
+      <button class="btn" onclick="closeModal('cell')">Cancel</button>
+      <button class="btn btn-green" onclick="saveCell()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- HEADER -->
+<header>
+  <div class="lab-logo">🧬</div>
+  <div class="header-text">
+    <h1>Jackson Lab — Antibody Tracker</h1>
+    <p>Primary &amp; Secondary Inventory · Storage Maps · Live Editing</p>
+  </div>
+  <div class="header-stats">
+    <div class="stat"><div class="stat-num" id="stat-primary">—</div><div class="stat-label">Primary</div></div>
+    <div class="stat"><div class="stat-num" id="stat-secondary">—</div><div class="stat-label">Secondary</div></div>
+    <div class="stat"><div class="stat-num" id="stat-working">—</div><div class="stat-label">Validated</div></div>
+  </div>
+</header>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('primary')">Primary Antibodies</div>
+  <div class="tab" onclick="switchTab('secondary')">Secondary Antibodies</div>
+  <div class="tab" onclick="switchTab('map')">Storage Maps</div>
+</div>
+
+<!-- PRIMARY PANEL -->
+<div class="panel active" id="panel-primary">
+  <div class="controls">
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="primary-search" placeholder="Search target, code, company…" oninput="filterPrimary()">
+    </div>
+    <select id="primary-host" onchange="filterPrimary()">
+      <option value="">All Hosts</option>
+      <option>Rabbit</option><option>Mouse</option><option>Guinea Pig</option>
+      <option>Chicken</option><option>Human</option><option>Goat</option>
+    </select>
+    <select id="primary-tissue" onchange="filterPrimary()">
+      <option value="">All Tissue/Location</option>
+      <option>Pre-synaptic</option><option>Post-synaptic</option>
+      <option>Inhibitory neuron</option><option>Excitatory neurons</option>
+      <option>Pan-neuronal</option><option>Astrocyte</option>
+      <option>Cytoplasmic</option><option>Cytoskeletal</option>
+      <option>Synaptic</option><option>Housekeeping</option>
+    </select>
+    <select id="primary-storage" onchange="filterPrimary()">
+      <option value="">All Storage</option>
+      <option value="4deg">4°C</option>
+      <option value="-20deg">-20°C</option>
+    </select>
+    <select id="primary-use" onchange="filterPrimary()">
+      <option value="">All Uses</option>
+      <option>IF</option><option>WB</option><option>IMC</option><option>IHC</option>
+    </select>
+    <button class="btn" onclick="clearFilters()">Clear</button>
+    <button class="btn btn-green" onclick="openAddPrimary()">+ Add Antibody</button>
+    <button class="btn btn-yellow" onclick="exportCSV('primary')">↓ CSV</button>
+    <button class="btn" onclick="exportJSON()">↓ Save JSON</button>
+    <label class="btn btn-yellow" style="cursor:pointer" title="Restore a previously saved JSON backup">
+      ↑ Load JSON<input type="file" accept=".json" onchange="importJSON(event)" style="display:none">
+    </label>
+    <button class="btn btn-red" onclick="forceResetToSeeds()" title="Wipe localStorage and reload all original seed data">↺ Restore Seed Data</button>
+    <button class="btn" style="background:#1a1a3a;border-color:#3a3a7a;color:#aaaaff" onclick="exportForWeb()" title="Download index.html with current data baked in, ready to push to GitHub Pages">⬆ Export for Web</button>
+    <span class="count-badge" id="primary-count"></span>
+  </div>
+  <div class="table-wrap">
+    <table id="primary-table">
+      <thead>
+        <tr>
+          <th onclick="sortTable(0)">Target <span class="sort-icon">⇅</span></th>
+          <th onclick="sortTable(1)">Host <span class="sort-icon">⇅</span></th>
+          <th onclick="sortTable(2)">Tissue/Location <span class="sort-icon">⇅</span></th>
+          <th onclick="sortTable(3)">Clone <span class="sort-icon">⇅</span></th>
+          <th onclick="sortTable(4)">Company <span class="sort-icon">⇅</span></th>
+          <th onclick="sortTable(5)">Code <span class="sort-icon">⇅</span></th>
+          <th>Use</th>
+          <th onclick="sortTable(7)">Storage <span class="sort-icon">⇅</span></th>
+          <th>Modifications</th>
+          <th>Location</th>
+          <th>WB</th>
+          <th>IF Conc</th>
+          <th>IMC Conc</th>
+          <th>Aliquots</th>
+          <th>Notes</th>
+          <th>Link</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="primary-tbody"></tbody>
+    </table>
+    <div class="empty-state" id="primary-empty" style="display:none">
+      <div class="icon">🔬</div><p>No antibodies match your filters.</p>
+    </div>
+  </div>
+</div>
+
+<!-- SECONDARY PANEL -->
+<div class="panel" id="panel-secondary">
+  <div class="controls">
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="secondary-search" placeholder="Search target, fluorophore, company…" oninput="filterSecondary()">
+    </div>
+    <select id="secondary-fluoro" onchange="filterSecondary()">
+      <option value="">All Fluorophores</option>
+      <option>488</option><option>568</option><option>647</option>
+    </select>
+    <button class="btn btn-green" onclick="openAddSecondary()">+ Add Secondary</button>
+    <button class="btn btn-yellow" onclick="exportCSV('secondary')">↓ CSV</button>
+    <span class="count-badge" id="secondary-count"></span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Target</th><th>Host</th><th>Clone</th><th>Company</th><th>Code</th>
+          <th>Fluorophore</th><th>Storage</th><th>WB Dilution</th><th>ICC Dilution</th>
+          <th>Notes</th><th>Link</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="secondary-tbody"></tbody>
+    </table>
+  </div>
+  <div class="controls" style="border-top:1px solid var(--border);font-size:0.8rem;color:var(--muted);">
+    <span>📌 All secondaries at <strong style="color:var(--text)">1:500</strong> for staining unless otherwise stated.</span>
+  </div>
+</div>
+
+<!-- MAP PANEL -->
+<div class="panel" id="panel-map">
+  <div class="map-section">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap">
+      <h2 style="font-size:1rem;font-weight:600">Storage Maps</h2>
+      <button class="btn btn-green add-map-btn" onclick="addMap()">+ New Map</button>
+      <span style="font-size:0.78rem;color:var(--muted)">Click any cell to edit · Rename map by clicking its title</span>
+    </div>
+    <div id="maps-container"></div>
+  </div>
+</div>
+
+<script>
+// ── EMERGENCY CLEAR — runs before everything else ──────────────────────────
+// If localStorage is empty or broken, wipe it so seeds load cleanly.
+(function() {
+  try {
+    const raw = localStorage.getItem('jacksonLabAbs');
+    if (!raw) return; // nothing saved — seeds will load fine
+    const d = JSON.parse(raw);
+    const ok = Array.isArray(d.primary) && d.primary.length > 0
+            && Array.isArray(d.secondary) && d.secondary.length > 0;
+    if (!ok) {
+      localStorage.removeItem('jacksonLabAbs');
+    }
+  } catch(e) {
+    localStorage.removeItem('jacksonLabAbs');
+  }
+})();
+// ──────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────
+// SEED DATA
+// ─────────────────────────────────────────────
+const SEED_PRIMARY = [
+  {target:'VGAT',host:'Rabbit',tissue:'Pre-synaptic',clone:'Polyclonal',company:'ThermoFisher',code:'PA5-63620',use:'IF',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.thermofisher.com/antibody/product/VGAT-Antibody-Polyclonal/PA5-63620'},
+  {target:'VGAT',host:'Mouse',tissue:'Pre-synaptic',clone:'CL2793',company:'Abcam',code:'ab211534',use:'not working',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'NOT WORKING',link:'https://www.abcam.com/slc32a1vgat-antibody-cl2793-ab211534.html'},
+  {target:'VGAT',host:'Mouse',tissue:'Pre-synaptic',clone:'117G4',company:'Synaptic Systems',code:'131 011',use:'',storage:'4deg',mod:'Aliquoted',loc:'-20 Freezer',wb:'',ifc:'',imc:'',notes:'',link:'https://sysy.com/product/131011',aliquots:null},
+  {target:'VGLUT1',host:'Mouse',tissue:'Pre-synaptic',clone:'CL2754',company:'Abcam',code:'ab242204',use:'IF, IMC',storage:'4deg',mod:'',loc:'',wb:'',ifc:'1:300',imc:'',notes:'',link:'https://www.abcam.com/vglut1-antibody-cl2754-ab242204.html'},
+  {target:'SV2a',host:'Rabbit',tissue:'Pre-synaptic',clone:'EPR23500-32',company:'Abcam',code:'ab273513',use:'IF, IMC',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'1:200',notes:'POSSIBLY NOT WORKING',link:'https://www.abcam.com/sv2a-antibody-epr23500-32-bsa-and-azide-free-ab273513.html'},
+  {target:'Gephyrin',host:'Rabbit',tissue:'Post-synaptic',clone:'EPR12651(B)',company:'Abcam',code:'ab249939',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.abcam.com/gephyrin-antibody-epr12651b-bsa-and-azide-free-ab249939.html'},
+  {target:'PSD-95',host:'Mouse',tissue:'Post-synaptic',clone:'K28/43',company:'Antibodies Inc',code:'75-028',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'1:100',imc:'',notes:'NOT WORKING',link:'https://www.antibodiesinc.com/products/anti-psd-95-antibody-k28-43-75-028'},
+  {target:'C1q',host:'Mouse',tissue:'',clone:'C1QA/2956',company:'Abcam',code:'ab268243',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.abcam.com/c1q-antibody-c1qa2956-bsa-and-azide-free-ab268243.html'},
+  {target:'VGLUT1',host:'Rabbit',tissue:'Pre-synaptic',clone:'EPR22269',company:'Abcam',code:'ab227805',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.abcam.com/vglut1-antibody-epr22269-ab227805.html'},
+  {target:'SV2a',host:'Goat',tissue:'Pre-synaptic',clone:'Polyclonal',company:'ThermoFisher',code:'PA5-18581',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'1:100',imc:'1:200',notes:'Aliquot in freezer',link:'https://www.thermofisher.com/antibody/product/SV2A-Antibody-Polyclonal/PA5-18581'},
+  {target:'VGAT',host:'Rabbit',tissue:'Pre-synaptic',clone:'Polyclonal',company:'ThermoFisher',code:'PA5-27569',use:'IHC, IF',storage:'4deg',mod:'',loc:'',wb:'',ifc:'1:100',imc:'',notes:'',link:'https://www.thermofisher.com/antibody/product/VGAT-Antibody-Polyclonal/PA5-63620'},
+  {target:'Synaptophysin',host:'Rabbit',tissue:'Pre-synaptic',clone:'SP11',company:'Abcam',code:'ab16659',use:'IHC, IF',storage:'4deg',mod:'',loc:'',wb:'',ifc:'1:200',imc:'',notes:'',link:'https://www.abcam.com/products/primary-antibodies/synaptophysin-antibody-sp11-ab16659.html'},
+  {target:'Somatostatin',host:'Rabbit',tissue:'Neuronal (inhib)',clone:'Polyclonal',company:'Abcam',code:'ab108456',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'1:100',imc:'',notes:'',link:'https://www.abcam.com/products/primary-antibodies/somatostatin-antibody-ab108456.html'},
+  {target:'NeuN',host:'Mouse',tissue:'Pan-neuronal',clone:'A60',company:'Merck',code:'MAB377',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'1:100',imc:'',notes:'',link:'https://www.merckmillipore.com/GB/en/product/Anti-NeuN-Antibody-clone-A60,MM_NF-MAB377'},
+  {target:'GAD1 (GAD67)',host:'Mouse',tissue:'Inhibitory neuron',clone:'GAD1/2391',company:'antibodies.com',code:'A251856',use:'',storage:'-20deg',mod:'',loc:'',wb:'',ifc:'1:200',imc:'',notes:'',link:'https://www.antibodies.com/gad67-antibody-gad1-2391-bsa-and-azide-free-a251856'},
+  {target:'PV (Parvalbumin)',host:'Rabbit',tissue:'Inhibitory neuron',clone:'Polyclonal',company:'Novus Biologicals',code:'NB120-11427',use:'',storage:'-20deg',mod:'',loc:'',wb:'',ifc:'1:1000',imc:'',notes:'',link:'https://www.novusbio.com/products/parvalbumin-antibody_nb120-11427'},
+  {target:'VIP',host:'Rabbit',tissue:'Inhibitory neuron',clone:'EPR23288-43',company:'Abcam',code:'ab273589',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.abcam.com/products/primary-antibodies/vip-antibody-epr23288-43-bsa-and-azide-free-ab273589.html'},
+  {target:'Neuroligin-3',host:'Rabbit',tissue:'Adhesion molecule',clone:'EPR23874-51',company:'Abcam',code:'ab283231',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.abcam.com/products/primary-antibodies/neuroligin-3-antibody-epr23874-51-bsa-and-azide-free-ab283231.html'},
+  {target:'HuC/D',host:'Mouse',tissue:'Pan-neuronal',clone:'16A11',company:'ThermoFisher',code:'A21271',use:'',storage:'-20deg',mod:'',loc:'',wb:'',ifc:'1:200',imc:'',notes:'',link:'https://www.thermofisher.com/antibody/product/HuC-HuD-Antibody-clone-16A11-Monoclonal/A-21271'},
+  {target:'CCK',host:'Rabbit',tissue:'Inhibitory neuron',clone:'Polyclonal',company:'Stratech',code:'LS-C177585-LSP',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.stratech.co.uk/products/LS-C177585-LSP/'},
+  {target:'RORB',host:'Rabbit',tissue:'Excitatory neurons',clone:'Polyclonal',company:'Stratech',code:'202727-T08-SIB',use:'',storage:'-20deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.stratech.co.uk/products/202727-T08-SIB/'},
+  {target:'VGAT',host:'Mouse',tissue:'Inhibitory neuron',clone:'Monoclonal',company:'Abcam',code:'ab211534',use:'',storage:'-20deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.abcam.com/products/primary-antibodies/slc32a1vgat-antibody-cl2793-ab211534.html'},
+  {target:'Clusterin',host:'Rabbit',tissue:'Astrocyte',clone:'Polyclonal',company:'Abcam',code:'ab69644',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.abcam.com/products/primary-antibodies/clusterin-antibody-ab69644.html'},
+  {target:'GluN1 (NMDAR1)',host:'Mouse',tissue:'Post-synaptic',clone:'N308/48',company:'Antibodies Inc',code:'75-272',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.antibodiesinc.com/products/anti-glun1-nr1-glutamate-receptor-antibody-n308-48-75-272'},
+  {target:'PSD-95',host:'Mouse',tissue:'Post-synaptic',clone:'1080',company:'Synaptic Systems',code:'124 011',use:'',storage:'4deg',mod:'Aliquoted',loc:'-20 Freezer',wb:'1:1000',ifc:'',imc:'',notes:'',link:'https://sysy.com/product/124011',aliquots:null},
+  {target:'Ezrin',host:'Rabbit',tissue:'Astrocyte',clone:'Polyclonal',company:'ThermoFisher',code:'16814585',use:'',storage:'-20deg',mod:'Aliquoted',loc:'-20 Freezer',wb:'',ifc:'',imc:'',notes:'',link:'https://www.fishersci.co.uk/shop/products/ezrin-rabbit-anti-human-mouse-polyclonal-proteintech-2/16814585',aliquots:null},
+  {target:'EAAT2',host:'Rabbit',tissue:'Astrocyte',clone:'Polyclonal',company:'Stratech',code:'BS-1751R-BSS',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.stratech.co.uk/products/BS-1751R-BSS/'},
+  {target:'Beta-actin',host:'Human',tissue:'Cytoplasmic',clone:'AbD12141',company:'Bio-Rad',code:'HCA147',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'DO NOT USE',link:'https://www.bio-rad-antibodies.com/monoclonal/human-actin-beta-antibody-abd12141-hca147.html'},
+  {target:'Calcineurin A',host:'Rabbit',tissue:'Cytoplasmic',clone:'JA64-11',company:'ThermoFisher',code:'MA5-32650',use:'WB, FC',storage:'4deg',mod:'Aliquoted',loc:'Freezer',wb:'1:1000',ifc:'',imc:'',notes:'',link:'https://www.thermofisher.com/antibody/product/Calcineurin-A-Antibody-clone-JA64-11-Recombinant-Monoclonal/MA5-32650',aliquots:null},
+  {target:'SV2a',host:'Rabbit',tissue:'Pre-synaptic',clone:'Monoclonal',company:'Abcam',code:'ab254351',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.abcam.com/en-gb/products/primary-antibodies/sv2a-antibody-epr23500-32-ab254351'},
+  {target:'Synaptophysin',host:'Rabbit',tissue:'Pre-synaptic',clone:'Monoclonal',company:'Abcam',code:'ab214621',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'Carrier free',link:'https://www.abcam.com/en-gb/products/primary-antibodies/synaptophysin-antibody-ep1098y-bsa-and-azide-free-ab214621'},
+  {target:'Gephyrin',host:'Rabbit',tissue:'Post-synaptic',clone:'Monoclonal',company:'Abcam',code:'ab177154',use:'',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.abcam.com/en-gb/products/primary-antibodies/gephyrin-antibody-epr12651b-ab177154'},
+  {target:'Beta-actin',host:'Chicken',tissue:'Cytoskeletal',clone:'Polyclonal',company:'Sigma',code:'SAB3500350',use:'',storage:'-20deg',mod:'Aliquoted',loc:'-20 freezer',wb:'',ifc:'',imc:'',notes:'',link:'https://www.sigmaaldrich.com/GB/en/product/sigma/sab3500350',aliquots:null},
+  {target:'NMDAR2B',host:'Mouse',tissue:'Synaptic',clone:'Monoclonal',company:'BD Biosciences',code:'610416',use:'WB, IF',storage:'-20deg',mod:'Aliquoted',loc:'-20 freezer',wb:'1:1000',ifc:'',imc:'',notes:'',link:'https://www.bdbiosciences.com/en-gb/products/reagents/microscopy-imaging-reagents/immunofluorescence-reagents/purified-mouse-anti-nmdar2b.610416',aliquots:null},
+  {target:'Synaptophysin',host:'Rabbit',tissue:'Pre-synaptic',clone:'Monoclonal',company:'Abcam',code:'ab16659',use:'IF, IMC',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.abcam.com/en-us/products/primary-antibodies/synaptophysin-antibody-sp11-synaptic-marker-ab16659'},
+  {target:'Gephyrin',host:'Mouse',tissue:'Post-synaptic',clone:'O93A6',company:'BioLegend',code:'856102',use:'IF',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'',link:'https://www.biolegend.com/en-gb/explore-new-products/purified-anti-gephyrin-antibody-16604'},
+  {target:'SV2a',host:'Rabbit',tissue:'Pre-synaptic',clone:'—',company:'Sigma',code:'HPA007863',use:'IF',storage:'-20deg',mod:'Aliquoted',loc:'-20 freezer',wb:'',ifc:'',imc:'',notes:'Lot: 000053249',link:'https://www.sigmaaldrich.com/GB/en/product/sigma/hpa007863',aliquots:null},
+  {target:'PHGDH',host:'Mouse',tissue:'Astrocyte',clone:'CL0555',company:'ThermoFisher',code:'MA5-31357',use:'IF/WB',storage:'-20deg',mod:'Aliquoted',loc:'-20 freezer',wb:'',ifc:'',imc:'',notes:'',link:'https://www.thermofisher.com/antibody/product/PHGDH-Antibody-clone-CL0555-Monoclonal/MA5-31357',aliquots:null},
+  {target:'Synaptophysin',host:'Guinea Pig',tissue:'Pre-synaptic',clone:'Gp7.2',company:'Synaptic Systems',code:'101 308',use:'IF',storage:'-20deg',mod:'Aliquoted',loc:'-20 freezer',wb:'',ifc:'',imc:'',notes:'',link:'',aliquots:null},
+  {target:'GAPDH',host:'Rabbit',tissue:'Housekeeping',clone:'Polyclonal',company:'ThermoFisher',code:'TAB1001',use:'WB',storage:'4deg',mod:'',loc:'',wb:'',ifc:'',imc:'',notes:'DO NOT FREEZE',link:''},
+];
+
+const SEED_MAPS = [
+  {
+    id: 'm1',
+    name: '4°C Fridge — Primary Antibodies',
+    rows: ['A','B','C','D','E'],
+    cols: 10,
+    cells: {
+      'A-1':{label:'VGLUT1 Rab\nab227805'},
+      'A-2':{label:'VGLUT1 Rab\nab227805'},
+      'A-3':{label:'VGLUT1 Mouse\nab242204'},
+      'A-4':{label:'VGLUT1 Mouse\nab242204'},
+      'A-5':{label:'VGLUT1 Mouse\nab242204'},
+      'A-6':{label:'VGLUT1 Mouse\nab242204'},
+      'A-7':{label:'VGLUT1 Mouse\nab242204'},
+      'A-8':{label:'VGLUT1 Mouse\nab242204'},
+      'A-9':{label:'SV2a Rab\nab273513'},
+      'A-10':{label:'SV2a Rab\nab273513'},
+      'B-1':{label:'SV2a Rab\nab254351'},
+      'B-3':{label:'VGAT Mouse\nab211534'},
+      'B-4':{label:'Synaptophysin\nab16659'},
+      'B-7':{label:'Gephyrin Rab\nab249939'},
+      'B-8':{label:'Gephyrin Rab\nab249939'},
+      'B-9':{label:'Gephyrin Rab\nab177154'},
+      'B-10':{label:'Gephyrin Mouse\n856102'},
+      'C-1':{label:'Somatostatin\nab108456'},
+      'C-2':{label:'VIP Rab\nab273589'},
+      'C-3':{label:'NFL Rab\nab223343'},
+      'C-4':{label:'NFL Mouse\nab7255'},
+      'C-5':{label:'Neuroligin\nab259348'},
+      'C-6':{label:'NL3 Rab\nab259348'},
+      'C-7':{label:'NL3 Rab\nab259348'},
+      'C-8':{label:'NL3 Mouse\nab186307'},
+      'C-9':{label:'Clusterin Rab\nab69644'},
+      'C-10':{label:'C1q Mouse\nab268243'},
+      'D-1':{label:'VGAT Mouse\nMA5-24643'},
+      'D-3':{label:'GAD67 Mouse\nA251856'},
+      'D-4':{label:'HuC/D Mouse\nA21271'},
+      'D-5':{label:'HuC/D Mouse\nA21271'},
+      'D-6':{label:'Calcineurin\nMA5-32650'},
+      'D-7':{label:'RORβ Rab\n202727-T08'},
+      'D-8':{label:'β-Actin Human\nHCA147'},
+      'D-9':{label:'CCK Rab\nLS-C177585'},
+      'D-10':{label:'CCK Rab\nLS-C177585'},
+      'E-1':{label:'NeuN Mouse\nMAB377'},
+      'E-2':{label:'GFAP Rat\n130300'},
+      'E-3':{label:'β-Actin Chicken\nSAB3500350'},
+      'E-4':{label:'VGAT Mouse\n131 011'},
+      'E-5':{label:'PSD95 Mouse\n124 011'},
+      'E-6':{label:'Synaptophysin\nab16659'},
+    }
+  },
+  {
+    id: 'm2',
+    name: '-20°C Freezer — Secondary Antibodies',
+    rows: ['A','B'],
+    cols: 5,
+    cells: {
+      'A-1':{label:'488 Goat\nanti-Guinea Pig', bg:'#1a2e1a', border:'#1e5530'},
+      'A-2':{label:'488 Goat\nanti-Chicken',    bg:'#1a2e1a', border:'#1e5530'},
+      'A-3':{label:'568 Donkey\nanti-Rat',       bg:'#2e1a1a', border:'#5a2020'},
+      'A-4':{label:'488 Donkey\nanti-Rabbit',    bg:'#1a2e1a', border:'#1e5530'},
+      'A-5':{label:'568 Donkey\nanti-Rabbit',    bg:'#2e1a1a', border:'#5a2020'},
+      'B-1':{label:'647 Donkey\nanti-Goat',      bg:'#2a1a3a', border:'#5a1a7a'},
+    }
+  }
+];
+
+const SEED_SECONDARY = [
+  {target:'Mouse',host:'Donkey',clone:'',company:'',code:'',fluoro:'647',storage:'',wb:'1:2000–1:5000',icc:'',notes:'',link:''},
+  {target:'Rabbit',host:'Goat',clone:'',company:'',code:'',fluoro:'568',storage:'',wb:'',icc:'',notes:'',link:''},
+  {target:'Mouse',host:'Goat',clone:'',company:'',code:'',fluoro:'568',storage:'',wb:'',icc:'',notes:'',link:''},
+  {target:'Goat',host:'Donkey',clone:'',company:'',code:'',fluoro:'488',storage:'',wb:'',icc:'',notes:'',link:''},
+  {target:'Goat',host:'Donkey',clone:'',company:'',code:'',fluoro:'568',storage:'',wb:'',icc:'',notes:'',link:''},
+  {target:'Rabbit',host:'Goat',clone:'',company:'',code:'',fluoro:'647',storage:'',wb:'',icc:'',notes:'',link:''},
+  {target:'Goat',host:'Donkey',clone:'',company:'',code:'',fluoro:'647',storage:'',wb:'',icc:'',notes:'',link:''},
+  {target:'Rabbit',host:'Donkey',clone:'Polyclonal',company:'Thermo',code:'A32790',fluoro:'488',storage:'4deg',wb:'',icc:'',notes:'',link:'https://www.thermofisher.com/antibody/product/Donkey-anti-Rabbit-IgG-H-L-Highly-Cross-Adsorbed-Secondary-Antibody-Polyclonal/A32790'},
+  {target:'Rat',host:'Donkey',clone:'',company:'',code:'',fluoro:'568',storage:'',wb:'',icc:'',notes:'',link:''},
+];
+
+// ─────────────────────────────────────────────
+// STATE — loaded from localStorage or seeds
+// ─────────────────────────────────────────────
+const DB_KEY = 'jacksonLabAbs';
+const DB_VERSION = 4;
+
+function loadState() {
+  try {
+    const saved = localStorage.getItem(DB_KEY);
+    if (saved) {
+      const d = JSON.parse(saved);
+      const hasPrimary = Array.isArray(d.primary) && d.primary.length > 0;
+      const hasSecondary = Array.isArray(d.secondary) && d.secondary.length > 0;
+      if (hasPrimary && hasSecondary) {
+        primaryData   = d.primary.map(r => ({ aliquots: null, ...r }));
+        secondaryData = d.secondary;
+        mapsData      = (Array.isArray(d.maps) && d.maps.length > 0)
+                          ? d.maps
+                          : JSON.parse(JSON.stringify(SEED_MAPS));
+        return;
+      }
+    }
+  } catch(e) {}
+  resetToSeeds();
+}
+
+function resetToSeeds() {
+  primaryData   = JSON.parse(JSON.stringify(SEED_PRIMARY));
+  secondaryData = JSON.parse(JSON.stringify(SEED_SECONDARY));
+  mapsData      = JSON.parse(JSON.stringify(SEED_MAPS));
+  saveState();
+}
+
+function saveState() {
+  try {
+    localStorage.setItem(DB_KEY, JSON.stringify({
+      _version: DB_VERSION,
+      primary: primaryData,
+      secondary: secondaryData,
+      maps: mapsData
+    }));
+  } catch(e) {}
+}
+
+function forceResetToSeeds() {
+  if (!confirm('This will restore all original seed data and overwrite any saved changes. Continue?')) return;
+  localStorage.removeItem(DB_KEY);
+  resetToSeeds();
+  currentPrimary = [...primaryData];
+  renderPrimary(currentPrimary);
+  renderSecondary(secondaryData);
+  renderMaps();
+  updateStats();
+  toast('Restored to seed data');
+}
+
+let primaryData = [], secondaryData = [], mapsData = [];
+let currentPrimary = [];
+let editingPrimaryIdx = -1, editingSecondaryIdx = -1;
+let primarySort = { col: -1, dir: 1 };
+let editingCell = null; // { mapId, key }
+
+// ─────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function tissueBadge(t) {
+  if (!t) return '';
+  const tl = t.toLowerCase();
+  let cls = 'badge-other';
+  if (tl.includes('pre-syn')) cls = 'badge-pre';
+  else if (tl.includes('post-syn')) cls = 'badge-post';
+  else if (tl.includes('inhib') || tl.includes('neuronal (inhib)')) cls = 'badge-inhib';
+  else if (tl.includes('excit')) cls = 'badge-excit';
+  else if (tl.includes('pan-neur')) cls = 'badge-pan';
+  else if (tl.includes('astro')) cls = 'badge-astro';
+  else if (tl.includes('adhesion')) cls = 'badge-post';
+  return `<span class="badge ${cls}">${esc(t)}</span>`;
+}
+
+function useTags(u) {
+  if (!u) return '<span style="color:var(--border)">—</span>';
+  const uses = u.split(/[,\/]+/).map(s => s.trim()).filter(Boolean);
+  return uses.map(tag => {
+    const low = tag.toLowerCase();
+    if (low.includes('not working')) return `<span class="use-tag use-bad">Not Working</span>`;
+    const up = tag.toUpperCase().replace(/\s/g,'');
+    if (up === 'IF')  return `<span class="use-tag use-IF">IF</span>`;
+    if (up === 'WB')  return `<span class="use-tag use-WB">WB</span>`;
+    if (up === 'IMC') return `<span class="use-tag use-IMC">IMC</span>`;
+    if (up === 'IHC') return `<span class="use-tag use-IHC">IHC</span>`;
+    if (up === 'FC')  return `<span class="use-tag use-FC">FC</span>`;
+    if (up === 'IF/WB') return `<span class="use-tag use-IF">IF</span><span class="use-tag use-WB">WB</span>`;
+    return `<span class="use-tag use-IF">${esc(tag)}</span>`;
+  }).join(' ');
+}
+
+function storageBadge(s) {
+  const n = (s||'').replace(/\s/g,'').toLowerCase();
+  if (n.includes('-20')) return `<span class="storage-20">-20°C</span>`;
+  if (n.includes('4d'))  return `<span class="storage-4">4°C</span>`;
+  return esc(s);
+}
+
+function noteHtml(n) {
+  if (!n) return '';
+  const low = n.toLowerCase();
+  if (low.includes('not working') || low.includes('do not use')) return `<span class="notes-warn">⚠ ${esc(n)}</span>`;
+  if (low.includes('possibly') || low.includes('do not freeze')) return `<span class="notes-info">⚡ ${esc(n)}</span>`;
+  return `<span style="color:var(--muted)">${esc(n)}</span>`;
+}
+
+function fluoroDot(f) {
+  const v = String(f);
+  const cls = v==='488' ? 'f488' : v==='568' ? 'f568' : 'f647';
+  return `<span class="fluoro-dot ${cls}"></span>${esc(v)} nm`;
+}
+
+function aliquotCell(r, idx) {
+  if (r.aliquots === null || r.aliquots === undefined) return '<span class="aliquot-na">—</span>';
+  const n = Number(r.aliquots);
+  const cls = n === 0 ? 'out' : n <= 2 ? 'low' : 'ok';
+  const warn = n === 0 ? ' ⚠' : n <= 2 ? ' !' : '';
+  return `<div class="aliquot-cell">
+    <button class="aliquot-btn" onclick="adjustAliquot(${idx},-1)" title="Use one aliquot">−</button>
+    <span class="aliquot-count ${cls}">${n}${warn}</span>
+    <button class="aliquot-btn" onclick="adjustAliquot(${idx},+1)" title="Add aliquot">+</button>
+  </div>`;
+}
+
+function adjustAliquot(idx, delta) {
+  const r = primaryData[idx];
+  if (r.aliquots === null || r.aliquots === undefined) return;
+  r.aliquots = Math.max(0, Number(r.aliquots) + delta);
+  saveState();
+  renderPrimary(currentPrimary);
+}
+
+function toast(msg, type='success') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `toast show ${type}`;
+  setTimeout(() => el.className = 'toast', 2800);
+}
+
+// ─────────────────────────────────────────────
+// RENDER PRIMARY
+// ─────────────────────────────────────────────
+function renderPrimary(data) {
+  const tbody = document.getElementById('primary-tbody');
+  const empty = document.getElementById('primary-empty');
+  document.getElementById('primary-count').textContent = `${data.length} of ${primaryData.length} antibodies`;
+  if (data.length === 0) { tbody.innerHTML = ''; empty.style.display = ''; return; }
+  empty.style.display = 'none';
+  tbody.innerHTML = data.map((r, vi) => {
+    const ri = primaryData.indexOf(r);
+    return `<tr>
+      <td class="target-cell">${esc(r.target)}</td>
+      <td><span class="badge badge-host">${esc(r.host)}</span></td>
+      <td>${tissueBadge(r.tissue)}</td>
+      <td style="color:var(--muted);font-size:0.8rem">${esc(r.clone)}</td>
+      <td style="font-size:0.8rem">${esc(r.company)}</td>
+      <td class="code-cell">${esc(r.code)}</td>
+      <td>${useTags(r.use)}</td>
+      <td>${storageBadge(r.storage)}</td>
+      <td style="font-size:0.76rem;color:var(--muted)">${esc(r.mod)}</td>
+      <td style="font-size:0.76rem;color:var(--muted)">${esc(r.loc)}</td>
+      <td style="font-size:0.8rem">${esc(r.wb)}</td>
+      <td style="font-size:0.8rem">${esc(r.ifc)}</td>
+      <td style="font-size:0.8rem">${esc(r.imc)}</td>
+      <td>${aliquotCell(r, ri)}</td>
+      <td class="notes-cell">${noteHtml(r.notes)}</td>
+      <td>${r.link ? `<a href="${esc(r.link)}" target="_blank" class="link-btn">↗ View</a>` : ''}</td>
+      <td><div class="row-actions">
+        <button class="icon-btn" onclick="openEditPrimary(${ri})" title="Edit">✏️</button>
+        <button class="icon-btn del" onclick="deletePrimary(${ri})" title="Delete">🗑</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+  updateStats();
+}
+
+function filterPrimary() {
+  const q = document.getElementById('primary-search').value.toLowerCase();
+  const host = document.getElementById('primary-host').value;
+  const tissue = document.getElementById('primary-tissue').value;
+  const storage = document.getElementById('primary-storage').value;
+  const use = document.getElementById('primary-use').value;
+  currentPrimary = primaryData.filter(r => {
+    const text = `${r.target} ${r.code} ${r.company} ${r.clone} ${r.notes}`.toLowerCase();
+    if (q && !text.includes(q)) return false;
+    if (host && r.host !== host) return false;
+    if (tissue && r.tissue !== tissue) return false;
+    if (storage) {
+      const n = (r.storage||'').replace(/\s/g,'').toLowerCase();
+      if (storage==='4deg' && !n.includes('4d')) return false;
+      if (storage==='-20deg' && !n.includes('-20')) return false;
+    }
+    if (use && !(r.use||'').toUpperCase().includes(use.toUpperCase())) return false;
+    return true;
+  });
+  renderPrimary(currentPrimary);
+}
+
+function clearFilters() {
+  ['primary-search','primary-host','primary-tissue','primary-storage','primary-use']
+    .forEach(id => { const el = document.getElementById(id); if(el.tagName==='INPUT') el.value=''; else el.value=''; });
+  currentPrimary = [...primaryData];
+  renderPrimary(currentPrimary);
+}
+
+const colKeys = ['target','host','tissue','clone','company','code','use','storage'];
+function sortTable(colIdx) {
+  const key = colKeys[colIdx];
+  if (!key) return;
+  if (primarySort.col === colIdx) primarySort.dir *= -1;
+  else { primarySort.col = colIdx; primarySort.dir = 1; }
+  currentPrimary.sort((a,b) => {
+    const av = (a[key]||'').toString().toLowerCase();
+    const bv = (b[key]||'').toString().toLowerCase();
+    return av < bv ? -primarySort.dir : av > bv ? primarySort.dir : 0;
+  });
+  document.querySelectorAll('#primary-table th').forEach((th,i) => {
+    th.classList.toggle('sorted', i===colIdx);
+    const ic = th.querySelector('.sort-icon');
+    if (ic) ic.textContent = i===colIdx ? (primarySort.dir===1?'↑':'↓') : '⇅';
+  });
+  renderPrimary(currentPrimary);
+}
+
+// ─────────────────────────────────────────────
+// RENDER SECONDARY
+// ─────────────────────────────────────────────
+function renderSecondary(data) {
+  const tbody = document.getElementById('secondary-tbody');
+  document.getElementById('secondary-count').textContent = `${data.length} of ${secondaryData.length} antibodies`;
+  tbody.innerHTML = data.map(r => {
+    const ri = secondaryData.indexOf(r);
+    return `<tr>
+      <td class="target-cell">Anti-${esc(r.target)}</td>
+      <td><span class="badge badge-host">${esc(r.host)}</span></td>
+      <td style="color:var(--muted);font-size:0.8rem">${esc(r.clone)||'—'}</td>
+      <td style="font-size:0.8rem">${esc(r.company)||'—'}</td>
+      <td class="code-cell">${esc(r.code)||'—'}</td>
+      <td>${fluoroDot(r.fluoro)}</td>
+      <td>${storageBadge(r.storage)}</td>
+      <td style="font-size:0.8rem">${esc(r.wb)||'—'}</td>
+      <td style="font-size:0.8rem">${esc(r.icc)||'1:500'}</td>
+      <td class="notes-cell">${noteHtml(r.notes)}</td>
+      <td>${r.link ? `<a href="${esc(r.link)}" target="_blank" class="link-btn">↗ View</a>` : ''}</td>
+      <td><div class="row-actions">
+        <button class="icon-btn" onclick="openEditSecondary(${ri})" title="Edit">✏️</button>
+        <button class="icon-btn del" onclick="deleteSecondary(${ri})" title="Delete">🗑</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+function filterSecondary() {
+  const q = document.getElementById('secondary-search').value.toLowerCase();
+  const fluoro = document.getElementById('secondary-fluoro').value;
+  const filtered = secondaryData.filter(r => {
+    const text = `${r.target} ${r.host} ${r.company} ${r.code}`.toLowerCase();
+    if (q && !text.includes(q)) return false;
+    if (fluoro && String(r.fluoro) !== fluoro) return false;
+    return true;
+  });
+  renderSecondary(filtered);
+}
+
+// ─────────────────────────────────────────────
+// STATS
+// ─────────────────────────────────────────────
+function updateStats() {
+  const working = primaryData.filter(r => {
+    const n = (r.notes||'').toLowerCase();
+    const u = (r.use||'').toLowerCase();
+    return !n.includes('not working') && !n.includes('do not use') && !u.includes('not working');
+  }).length;
+  document.getElementById('stat-working').textContent = working;
+  document.getElementById('stat-primary').textContent = primaryData.length;
+  document.getElementById('stat-secondary').textContent = secondaryData.length;
+}
+
+// ─────────────────────────────────────────────
+// MODAL — PRIMARY
+// ─────────────────────────────────────────────
+function openAddPrimary() {
+  editingPrimaryIdx = -1;
+  document.getElementById('modal-primary-title').textContent = 'Add Primary Antibody';
+  ['f-target','f-host','f-tissue','f-clone','f-company','f-code','f-use','f-storage',
+   'f-mod','f-loc','f-aliquots','f-wb','f-ifc','f-imc','f-link','f-notes'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('modal-primary').classList.add('open');
+}
+
+function openEditPrimary(idx) {
+  editingPrimaryIdx = idx;
+  const r = primaryData[idx];
+  document.getElementById('modal-primary-title').textContent = `Edit: ${r.target}`;
+  document.getElementById('f-target').value = r.target||'';
+  document.getElementById('f-host').value = r.host||'';
+  document.getElementById('f-tissue').value = r.tissue||'';
+  document.getElementById('f-clone').value = r.clone||'';
+  document.getElementById('f-company').value = r.company||'';
+  document.getElementById('f-code').value = r.code||'';
+  document.getElementById('f-use').value = r.use||'';
+  document.getElementById('f-storage').value = r.storage||'';
+  document.getElementById('f-mod').value = r.mod||'';
+  document.getElementById('f-loc').value    = r.loc||'';
+  document.getElementById('f-aliquots').value = (r.aliquots !== null && r.aliquots !== undefined) ? r.aliquots : '';
+  document.getElementById('f-wb').value = r.wb||'';
+  document.getElementById('f-ifc').value = r.ifc||'';
+  document.getElementById('f-imc').value = r.imc||'';
+  document.getElementById('f-link').value = r.link||'';
+  document.getElementById('f-notes').value = r.notes||'';
+  document.getElementById('modal-primary').classList.add('open');
+}
+
+function savePrimary() {
+  const target = document.getElementById('f-target').value.trim();
+  const code   = document.getElementById('f-code').value.trim();
+  if (!target || !code) { toast('Target and Code are required.', 'error'); return; }
+  const obj = {
+    target, code,
+    host:    document.getElementById('f-host').value,
+    tissue:  document.getElementById('f-tissue').value,
+    clone:   document.getElementById('f-clone').value.trim(),
+    company: document.getElementById('f-company').value.trim(),
+    use:     document.getElementById('f-use').value.trim(),
+    storage: document.getElementById('f-storage').value,
+    mod:     document.getElementById('f-mod').value.trim(),
+    loc:     document.getElementById('f-loc').value.trim(),
+    wb:      document.getElementById('f-wb').value.trim(),
+    ifc:     document.getElementById('f-ifc').value.trim(),
+    imc:     document.getElementById('f-imc').value.trim(),
+    link:    document.getElementById('f-link').value.trim(),
+    notes:   document.getElementById('f-notes').value.trim(),
+    aliquots: (document.getElementById('f-aliquots').value.trim() !== '') ? Number(document.getElementById('f-aliquots').value) : null,
+  };
+  if (editingPrimaryIdx >= 0) {
+    primaryData[editingPrimaryIdx] = obj;
+    toast(`Updated: ${obj.target}`);
+  } else {
+    primaryData.push(obj);
+    toast(`Added: ${obj.target}`);
+  }
+  saveState();
+  closeModal('primary');
+  currentPrimary = [...primaryData];
+  renderPrimary(currentPrimary);
+}
+
+function deletePrimary(idx) {
+  const name = primaryData[idx].target;
+  if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+  primaryData.splice(idx, 1);
+  saveState();
+  currentPrimary = [...primaryData];
+  renderPrimary(currentPrimary);
+  toast(`Deleted: ${name}`, 'error');
+}
+
+// ─────────────────────────────────────────────
+// MODAL — SECONDARY
+// ─────────────────────────────────────────────
+function openAddSecondary() {
+  editingSecondaryIdx = -1;
+  document.getElementById('modal-secondary-title').textContent = 'Add Secondary Antibody';
+  ['sf-target','sf-host','sf-fluoro','sf-clone','sf-company','sf-code',
+   'sf-storage','sf-wb','sf-icc','sf-link','sf-notes'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('modal-secondary').classList.add('open');
+}
+
+function openEditSecondary(idx) {
+  editingSecondaryIdx = idx;
+  const r = secondaryData[idx];
+  document.getElementById('modal-secondary-title').textContent = `Edit: Anti-${r.target} ${r.fluoro}nm`;
+  document.getElementById('sf-target').value  = r.target||'';
+  document.getElementById('sf-host').value    = r.host||'';
+  document.getElementById('sf-fluoro').value  = String(r.fluoro)||'';
+  document.getElementById('sf-clone').value   = r.clone||'';
+  document.getElementById('sf-company').value = r.company||'';
+  document.getElementById('sf-code').value    = r.code||'';
+  document.getElementById('sf-storage').value = r.storage||'';
+  document.getElementById('sf-wb').value      = r.wb||'';
+  document.getElementById('sf-icc').value     = r.icc||'';
+  document.getElementById('sf-link').value    = r.link||'';
+  document.getElementById('sf-notes').value   = r.notes||'';
+  document.getElementById('modal-secondary').classList.add('open');
+}
+
+function saveSecondary() {
+  const target = document.getElementById('sf-target').value.trim();
+  const fluoro = document.getElementById('sf-fluoro').value;
+  if (!target || !fluoro) { toast('Target and Fluorophore are required.', 'error'); return; }
+  const obj = {
+    target, fluoro,
+    host:    document.getElementById('sf-host').value,
+    clone:   document.getElementById('sf-clone').value.trim(),
+    company: document.getElementById('sf-company').value.trim(),
+    code:    document.getElementById('sf-code').value.trim(),
+    storage: document.getElementById('sf-storage').value,
+    wb:      document.getElementById('sf-wb').value.trim(),
+    icc:     document.getElementById('sf-icc').value.trim(),
+    link:    document.getElementById('sf-link').value.trim(),
+    notes:   document.getElementById('sf-notes').value.trim(),
+  };
+  if (editingSecondaryIdx >= 0) {
+    secondaryData[editingSecondaryIdx] = obj;
+    toast(`Updated: Anti-${obj.target} ${obj.fluoro}nm`);
+  } else {
+    secondaryData.push(obj);
+    toast(`Added: Anti-${obj.target} ${obj.fluoro}nm`);
+  }
+  saveState();
+  closeModal('secondary');
+  renderSecondary(secondaryData);
+  updateStats();
+}
+
+function deleteSecondary(idx) {
+  const r = secondaryData[idx];
+  const name = `Anti-${r.target} ${r.fluoro}nm`;
+  if (!confirm(`Delete "${name}"?`)) return;
+  secondaryData.splice(idx, 1);
+  saveState();
+  renderSecondary(secondaryData);
+  updateStats();
+  toast(`Deleted: ${name}`, 'error');
+}
+
+function closeModal(which) {
+  document.getElementById('modal-' + which).classList.remove('open');
+}
+
+// Close modal on overlay click
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
+});
+
+// ─────────────────────────────────────────────
+// EXPORT / IMPORT
+// ─────────────────────────────────────────────
+function exportCSV(type) {
+  let rows, headers;
+  if (type === 'primary') {
+    headers = ['Target','Host','Tissue','Clone','Company','Code','Use','Storage','Modifications','Location','Aliquots Remaining','WB','IF Conc','IMC Conc','Notes','Link'];
+    rows = primaryData.map(r => [r.target,r.host,r.tissue,r.clone,r.company,r.code,r.use,r.storage,r.mod,r.loc,(r.aliquots !== null && r.aliquots !== undefined) ? r.aliquots : '',r.wb,r.ifc,r.imc,r.notes,r.link]);
+  } else {
+    headers = ['Target','Host','Clone','Company','Code','Fluorophore','Storage','WB','ICC','Notes','Link'];
+    rows = secondaryData.map(r => [r.target,r.host,r.clone,r.company,r.code,r.fluoro,r.storage,r.wb,r.icc,r.notes,r.link]);
+  }
+  const csv = [headers, ...rows].map(r => r.map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  download(`jackson_lab_${type}_antibodies.csv`, csv, 'text/csv');
+  toast(`CSV exported`);
+}
+
+function exportJSON() {
+  const data = JSON.stringify({ primary: primaryData, secondary: secondaryData, maps: mapsData }, null, 2);
+  download('jackson_lab_antibodies_backup.json', data, 'application/json');
+  toast('JSON backup saved');
+}
+
+function exportForWeb() {
+  // Fetch the current HTML source, then replace the three seed constants
+  // with the live data, and download as index.html ready for GitHub Pages.
+  fetch(location.href)
+    .then(r => r.text())
+    .then(src => {
+      const primaryJSON  = JSON.stringify(primaryData,   null, 2);
+      const secondaryJSON= JSON.stringify(secondaryData, null, 2);
+      const mapsJSON     = JSON.stringify(mapsData,      null, 2);
+
+      // Replace SEED_PRIMARY
+      src = src.replace(
+        /const SEED_PRIMARY\s*=\s*\[[\s\S]*?\](?=\s*;)/,
+        'const SEED_PRIMARY = ' + primaryJSON
+      );
+      // Replace SEED_SECONDARY
+      src = src.replace(
+        /const SEED_SECONDARY\s*=\s*\[[\s\S]*?\](?=\s*;)/,
+        'const SEED_SECONDARY = ' + secondaryJSON
+      );
+      // Replace SEED_MAPS
+      src = src.replace(
+        /const SEED_MAPS\s*=\s*\[[\s\S]*?\](?=\s*;)/,
+        'const SEED_MAPS = ' + mapsJSON
+      );
+
+      download('index.html', src, 'text/html');
+      toast('index.html ready — push to GitHub to publish');
+    })
+    .catch(() => toast('Could not fetch page source. Open the file via a local server or the start-tracker.bat.', 'error'));
+}
+
+function importJSON(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const d = JSON.parse(e.target.result);
+      if (!d.primary || !d.secondary) throw new Error('Invalid format');
+      primaryData = d.primary;
+      secondaryData = d.secondary;
+      if (d.maps) mapsData = d.maps;
+      saveState();
+      currentPrimary = [...primaryData];
+      renderPrimary(currentPrimary);
+      renderSecondary(secondaryData);
+      renderMaps();
+      updateStats();
+      toast(`Loaded: ${primaryData.length} primary, ${secondaryData.length} secondary`);
+    } catch(err) {
+      toast('Invalid JSON file', 'error');
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function download(filename, content, mime) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], {type: mime}));
+  a.download = filename;
+  a.click();
+}
+
+// ─────────────────────────────────────────────
+// TABS
+// ─────────────────────────────────────────────
+function switchTab(name) {
+  const names = ['primary','secondary','map'];
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', names[i]===name));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+}
+
+// ─────────────────────────────────────────────
+// STORAGE MAPS
+// ─────────────────────────────────────────────
+function renderMaps() {
+  const container = document.getElementById('maps-container');
+  if (!container) return;
+  container.innerHTML = mapsData.map(map => renderMapBlock(map)).join('');
+}
+
+function renderMapBlock(map) {
+  const colNums = Array.from({length: map.cols}, (_,i) => `<div class="col-num">${i+1}</div>`).join('');
+  const rows = map.rows.map(row => {
+    const cells = Array.from({length: map.cols}, (_,ci) => {
+      const key = `${row}-${ci+1}`;
+      const cell = map.cells[key] || {};
+      const label = cell.label || '';
+      const style = cell.bg ? `background:${cell.bg};border-color:${cell.border||cell.bg};` : '';
+      const cls = label ? '' : ' empty';
+      const display = label ? label.replace(/\n/g,'<br>') : '—';
+      return `<div class="box-cell${cls}" style="${style}" onclick="openCellEdit('${map.id}','${key}')">${display}<span class="cell-edit-hint">✏</span></div>`;
+    }).join('');
+    return `<div class="box-row">
+      <div class="row-label">${row}</div>
+      ${cells}
+      <button class="del-row-btn" onclick="deleteRow('${map.id}','${row}')" title="Delete row ${row}">✕</button>
+    </div>`;
+  }).join('');
+
+  return `<div class="map-block" id="mapblock-${map.id}">
+    <div class="map-block-header">
+      <input class="map-title-input" value="${esc(map.name)}" onchange="renameMap('${map.id}',this.value)" title="Click to rename">
+      <span class="map-subtitle">${map.rows.length} rows × ${map.cols} cols</span>
+      <div class="map-actions">
+        <button class="btn" onclick="addCol('${map.id}')">+ Col</button>
+        <button class="btn" onclick="removeCol('${map.id}')">− Col</button>
+        <button class="btn btn-red" onclick="deleteMap('${map.id}')">Delete Map</button>
+      </div>
+    </div>
+    <div class="box-grid-header">${colNums}</div>
+    ${rows}
+    <button class="add-row-btn btn" onclick="addRow('${map.id}')">+ Add Row</button>
+  </div>`;
+}
+
+function renameMap(id, name) {
+  const map = mapsData.find(m => m.id === id);
+  if (map) { map.name = name; saveState(); }
+}
+
+function addMap() {
+  const id = 'm' + Date.now();
+  mapsData.push({ id, name: 'New Storage Map', rows: ['A','B','C'], cols: 5, cells: {} });
+  saveState();
+  renderMaps();
+  toast('New map added');
+}
+
+function deleteMap(id) {
+  const map = mapsData.find(m => m.id === id);
+  if (!map) return;
+  if (!confirm(`Delete map "${map.name}"?`)) return;
+  mapsData = mapsData.filter(m => m.id !== id);
+  saveState();
+  renderMaps();
+  toast('Map deleted', 'error');
+}
+
+function addRow(id) {
+  const map = mapsData.find(m => m.id === id);
+  if (!map) return;
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const next = letters[map.rows.length] || `R${map.rows.length+1}`;
+  map.rows.push(next);
+  saveState();
+  renderMaps();
+}
+
+function deleteRow(id, row) {
+  const map = mapsData.find(m => m.id === id);
+  if (!map || map.rows.length <= 1) { toast('Cannot delete the only row', 'error'); return; }
+  if (!confirm(`Delete row ${row} and all its cells?`)) return;
+  map.rows = map.rows.filter(r => r !== row);
+  Object.keys(map.cells).forEach(k => { if (k.startsWith(row + '-')) delete map.cells[k]; });
+  saveState();
+  renderMaps();
+}
+
+function addCol(id) {
+  const map = mapsData.find(m => m.id === id);
+  if (!map) return;
+  map.cols++;
+  saveState();
+  renderMaps();
+}
+
+function removeCol(id) {
+  const map = mapsData.find(m => m.id === id);
+  if (!map || map.cols <= 1) { toast('Cannot remove the only column', 'error'); return; }
+  const col = map.cols;
+  map.rows.forEach(r => delete map.cells[`${r}-${col}`]);
+  map.cols--;
+  saveState();
+  renderMaps();
+}
+
+// ─── Cell Edit Modal ───────────────────────────
+function openCellEdit(mapId, key) {
+  editingCell = { mapId, key };
+  const map = mapsData.find(m => m.id === mapId);
+  const cell = (map && map.cells[key]) || {};
+  document.getElementById('modal-cell-title').textContent = `Edit cell ${key.replace('-', ' col ')}`;
+  document.getElementById('cell-label').value = (cell.label || '').replace(/\n/g, '\n');
+
+  // Highlight active swatch
+  const activeBg = cell.bg || '';
+  document.querySelectorAll('.colour-swatch').forEach(sw => {
+    sw.classList.toggle('selected', sw.dataset.bg === activeBg);
+  });
+
+  document.getElementById('modal-cell').classList.add('open');
+}
+
+function saveCell() {
+  if (!editingCell) return;
+  const { mapId, key } = editingCell;
+  const map = mapsData.find(m => m.id === mapId);
+  if (!map) return;
+  const label = document.getElementById('cell-label').value.trim();
+  const selected = document.querySelector('.colour-swatch.selected');
+  const bg = selected ? selected.dataset.bg : '';
+  const border = selected ? selected.dataset.border : '';
+  if (!label) {
+    delete map.cells[key];
+  } else {
+    map.cells[key] = { label, ...(bg ? { bg, border } : {}) };
+  }
+  saveState();
+  closeModal('cell');
+  renderMaps();
+  toast('Cell updated');
+}
+
+function clearCell() {
+  if (!editingCell) return;
+  const { mapId, key } = editingCell;
+  const map = mapsData.find(m => m.id === mapId);
+  if (map) delete map.cells[key];
+  saveState();
+  closeModal('cell');
+  renderMaps();
+  toast('Cell cleared');
+}
+
+// Swatch selection
+document.addEventListener('click', e => {
+  const sw = e.target.closest('.colour-swatch');
+  if (!sw) return;
+  document.querySelectorAll('.colour-swatch').forEach(s => s.classList.remove('selected'));
+  sw.classList.add('selected');
+});
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
+loadState();
+currentPrimary = [...primaryData];
+renderPrimary(currentPrimary);
+renderSecondary(secondaryData);
+renderMaps();
+updateStats();
+</script>
+</body>
+</html>
