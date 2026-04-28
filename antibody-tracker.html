@@ -387,6 +387,10 @@
     <div class="stat"><div class="stat-num" id="stat-secondary">—</div><div class="stat-label">Secondary</div></div>
     <div class="stat"><div class="stat-num" id="stat-working">—</div><div class="stat-label">Validated</div></div>
   </div>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;margin-left:16px">
+    <span id="sync-status" style="font-size:0.75rem;color:var(--muted)">⟳ Loading…</span>
+    <button class="btn" style="padding:4px 10px;font-size:0.72rem" onclick="promptToken();toast('Token saved')" title="Set GitHub Personal Access Token">🔑 Set Token</button>
+  </div>
 </header>
 
 <div class="tabs">
@@ -511,23 +515,164 @@
 </div>
 
 <script>
-// ── EMERGENCY CLEAR — runs before everything else ──────────────────────────
-// If localStorage is empty or broken, wipe it so seeds load cleanly.
-(function() {
-  try {
-    const raw = localStorage.getItem('jacksonLabAbs');
-    if (!raw) return; // nothing saved — seeds will load fine
-    const d = JSON.parse(raw);
-    const ok = Array.isArray(d.primary) && d.primary.length > 0
-            && Array.isArray(d.secondary) && d.secondary.length > 0;
-    if (!ok) {
-      localStorage.removeItem('jacksonLabAbs');
-    }
-  } catch(e) {
-    localStorage.removeItem('jacksonLabAbs');
+// ── GITHUB SYNC CONFIG ────────────────────────────────────────────────────
+const GH_REPO  = 'jackson-lab-synapse-targeting-group/Jackson-lab-antibodies';
+const GH_BRANCH = 'main';
+const GH_FILE  = 'data/antibodies.json';
+const GH_RAW_URL = `https://raw.githubusercontent.com/${GH_REPO}/${GH_BRANCH}/${GH_FILE}`;
+const GH_API_URL = `https://api.github.com/repos/${GH_REPO}/contents/${GH_FILE}`;
+const PAT_KEY  = 'jacksonLabGHToken';
+
+function getToken() {
+  return localStorage.getItem(PAT_KEY) || '';
+}
+
+function promptToken() {
+  const current = getToken();
+  const val = prompt(
+    'Enter your GitHub Personal Access Token (PAT) with Contents write access.\n\n' +
+    'Create one at: github.com → Settings → Developer Settings → Personal access tokens → Fine-grained tokens\n' +
+    'Required permission: Repository > Contents > Read and Write\n\n' +
+    'The token is stored only in this browser\'s localStorage.',
+    current
+  );
+  if (val !== null) {
+    localStorage.setItem(PAT_KEY, val.trim());
+    return val.trim();
   }
-})();
-// ──────────────────────────────────────────────────────────────────────────
+  return current;
+}
+
+let ghFileSha = null; // tracks current SHA for update commits
+
+async function loadFromGitHub() {
+  try {
+    showSyncStatus('loading');
+    // Add cache-busting timestamp to always get latest
+    const res = await fetch(GH_RAW_URL + '?t=' + Date.now());
+    if (!res.ok) {
+      if (res.status === 404) {
+        // File doesn't exist yet — use seeds and create it on first save
+        showSyncStatus('no-file');
+        resetToSeeds();
+        return;
+      }
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const d = await res.json();
+    // Also fetch the SHA we'll need to update the file
+    const apiRes = await fetch(GH_API_URL, {
+      headers: getToken() ? { Authorization: `token ${getToken()}` } : {}
+    });
+    if (apiRes.ok) {
+      const meta = await apiRes.json();
+      ghFileSha = meta.sha;
+    }
+    const hasPrimary   = Array.isArray(d.primary)   && d.primary.length   > 0;
+    const hasSecondary = Array.isArray(d.secondary) && d.secondary.length > 0;
+    if (hasPrimary && hasSecondary) {
+      primaryData   = d.primary.map(r => ({ aliquots: null, ...r }));
+      secondaryData = d.secondary;
+      mapsData      = (Array.isArray(d.maps) && d.maps.length > 0)
+                        ? d.maps
+                        : JSON.parse(JSON.stringify(SEED_MAPS));
+      // Also mirror to localStorage as offline fallback
+      localStorage.setItem('jacksonLabAbs', JSON.stringify({ primary: primaryData, secondary: secondaryData, maps: mapsData }));
+      showSyncStatus('ok');
+      return;
+    }
+    throw new Error('Unexpected data shape');
+  } catch(e) {
+    console.warn('GitHub load failed, falling back to localStorage:', e);
+    showSyncStatus('offline');
+    loadFromLocalStorage();
+  }
+}
+
+async function saveToGitHub(retryWithNewToken) {
+  let token = getToken();
+  if (!token) {
+    token = promptToken();
+    if (!token) { toast('Save cancelled — no token provided', 'error'); return; }
+  }
+
+  const payload = { primary: primaryData, secondary: secondaryData, maps: mapsData };
+  const content = btoa(unescape(encodeURIComponent(JSON.stringify(payload, null, 2))));
+  const body = {
+    message: `Update antibody data [${new Date().toISOString().slice(0,19).replace('T',' ')}]`,
+    content,
+    branch: GH_BRANCH,
+  };
+  if (ghFileSha) body.sha = ghFileSha;
+
+  showSyncStatus('saving');
+  try {
+    const res = await fetch(GH_API_URL, {
+      method: 'PUT',
+      headers: {
+        Authorization: `token ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 401 || res.status === 403) {
+      const retry = confirm('GitHub token rejected. Would you like to enter a new token and try again?');
+      if (retry) {
+        promptToken();
+        await saveToGitHub(true);
+      } else {
+        showSyncStatus('auth-error');
+        toast('GitHub save failed — invalid token', 'error');
+      }
+      return;
+    }
+    if (res.status === 409) {
+      // Conflict — file was updated by someone else; re-fetch SHA and retry
+      toast('Sync conflict detected — refreshing and retrying…', 'error');
+      const apiRes = await fetch(GH_API_URL, { headers: { Authorization: `token ${token}` } });
+      if (apiRes.ok) { const meta = await apiRes.json(); ghFileSha = meta.sha; body.sha = ghFileSha; }
+      const res2 = await fetch(GH_API_URL, {
+        method: 'PUT',
+        headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res2.ok) throw new Error(`Retry failed: ${res2.status}`);
+      const d2 = await res2.json();
+      ghFileSha = d2.content.sha;
+      showSyncStatus('ok');
+      toast('Saved to GitHub');
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+    ghFileSha = d.content.sha;
+    showSyncStatus('ok');
+    toast('Saved to GitHub');
+  } catch(e) {
+    console.error('GitHub save error:', e);
+    showSyncStatus('error');
+    toast('GitHub save failed — check console', 'error');
+  }
+}
+
+function showSyncStatus(state) {
+  const el = document.getElementById('sync-status');
+  if (!el) return;
+  const states = {
+    'loading':    { text: '⟳ Loading from GitHub…', color: 'var(--muted)' },
+    'saving':     { text: '⟳ Saving to GitHub…',   color: 'var(--accent)' },
+    'ok':         { text: '✓ GitHub synced',         color: 'var(--green)' },
+    'offline':    { text: '⚠ Offline — using local cache', color: 'var(--yellow)' },
+    'no-file':    { text: '⚠ No remote data yet — will create on first save', color: 'var(--yellow)' },
+    'auth-error': { text: '✕ Auth error — click 🔑 to set token', color: 'var(--red)' },
+    'error':      { text: '✕ Sync error',            color: 'var(--red)' },
+  };
+  const s = states[state] || states['error'];
+  el.textContent = s.text;
+  el.style.color = s.color;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────
 // SEED DATA
@@ -660,7 +805,7 @@ const SEED_SECONDARY = [
 const DB_KEY = 'jacksonLabAbs';
 const DB_VERSION = 4;
 
-function loadState() {
+function loadFromLocalStorage() {
   try {
     const saved = localStorage.getItem(DB_KEY);
     if (saved) {
@@ -680,6 +825,19 @@ function loadState() {
   resetToSeeds();
 }
 
+// loadState now loads from localStorage immediately (for fast render),
+// then kicks off a GitHub fetch to get the freshest data.
+function loadState() {
+  loadFromLocalStorage();
+  loadFromGitHub().then(() => {
+    currentPrimary = [...primaryData];
+    renderPrimary(currentPrimary);
+    renderSecondary(secondaryData);
+    renderMaps();
+    updateStats();
+  });
+}
+
 function resetToSeeds() {
   primaryData   = JSON.parse(JSON.stringify(SEED_PRIMARY));
   secondaryData = JSON.parse(JSON.stringify(SEED_SECONDARY));
@@ -688,6 +846,7 @@ function resetToSeeds() {
 }
 
 function saveState() {
+  // Always mirror to localStorage as offline fallback
   try {
     localStorage.setItem(DB_KEY, JSON.stringify({
       _version: DB_VERSION,
@@ -696,6 +855,9 @@ function saveState() {
       maps: mapsData
     }));
   } catch(e) {}
+  // Debounce GitHub saves to avoid hammering API on rapid changes (e.g. aliquot buttons)
+  clearTimeout(saveState._timer);
+  saveState._timer = setTimeout(() => saveToGitHub(), 800);
 }
 
 function forceResetToSeeds() {
@@ -707,7 +869,8 @@ function forceResetToSeeds() {
   renderSecondary(secondaryData);
   renderMaps();
   updateStats();
-  toast('Restored to seed data');
+  toast('Restored to seed data — saving to GitHub…');
+  saveToGitHub();
 }
 
 let primaryData = [], secondaryData = [], mapsData = [];
