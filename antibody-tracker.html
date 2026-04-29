@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Jackson Lab — Antibody Tracker</title>
+<!-- Microsoft Authentication Library (MSAL) for silent SharePoint sign-in -->
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <style>
   :root {
     --bg: #0f1117;
@@ -389,7 +391,7 @@
   </div>
   <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;margin-left:16px">
     <span id="sync-status" style="font-size:0.75rem;color:var(--muted)">⟳ Loading…</span>
-    <button class="btn" style="padding:4px 10px;font-size:0.72rem" onclick="setToken()" title="Set GitHub Personal Access Token (lab manager only)">🔑 Set Token</button>
+    <button class="btn" style="padding:4px 10px;font-size:0.72rem" onclick="loadFromSharePoint().then(()=>{currentPrimary=[...primaryData];renderPrimary(currentPrimary);renderSecondary(secondaryData);renderMaps();updateStats();})" title="Reload latest data from SharePoint">↺ Refresh</button>
   </div>
 </header>
 
@@ -431,9 +433,9 @@
     <button class="btn" onclick="clearFilters()">Clear</button>
     <button class="btn btn-green" onclick="openAddPrimary()">+ Add Antibody</button>
     <button class="btn btn-yellow" onclick="exportCSV('primary')">↓ CSV</button>
-    <button class="btn" onclick="shareMyChanges()" title="Export your changes as a file to send to the lab manager">📤 Share my changes</button>
-    <label class="btn btn-green" style="cursor:pointer" title="Lab manager: load a teammate's changes file and publish live to GitHub">
-      📥 Load &amp; Publish<input type="file" accept=".json" onchange="loadAndPublish(event)" style="display:none">
+    <button class="btn" onclick="exportJSON()">↓ Backup JSON</button>
+    <label class="btn btn-yellow" style="cursor:pointer" title="Restore from a JSON backup file">
+      ↑ Restore JSON<input type="file" accept=".json" onchange="importJSON(event)" style="display:none">
     </label>
     <button class="btn btn-red" onclick="forceResetToSeeds()" title="Wipe localStorage and reload all original seed data">↺ Restore Seed Data</button>
     <span class="count-badge" id="primary-count"></span>
@@ -514,42 +516,97 @@
 </div>
 
 <script>
-// ── GITHUB SYNC ───────────────────────────────────────────────────────────
-// Anyone can VIEW — data is loaded from the public GitHub raw URL.
-// Only the repo owner needs a token to PUBLISH changes.
-// Teammates use "Share my changes" to export a file; the owner loads it
-// with "Load & Publish" to push it live for everyone.
-const GH_REPO    = 'jackson-lab-synapse-targeting-group/Jackson-lab-antibodies';
-const GH_BRANCH  = 'main';
-const GH_FILE    = 'data/antibodies.json';
-const GH_RAW_URL = `https://raw.githubusercontent.com/${GH_REPO}/${GH_BRANCH}/${GH_FILE}`;
-const GH_API_URL = `https://api.github.com/repos/${GH_REPO}/contents/${GH_FILE}`;
-const PAT_KEY    = 'jacksonLabGHToken';
+// ── SHAREPOINT SYNC ───────────────────────────────────────────────────────
+// Uses Microsoft Graph API + MSAL silent sign-in.
+// Any user already logged into their Imperial Microsoft account can read
+// and write automatically — no tokens or setup required.
+//
+// SETUP REQUIRED (one-time, by IT or lab manager):
+//   Register an Azure AD app at portal.azure.com → Azure Active Directory
+//   → App registrations → New registration
+//   - Name: Antibody Tracker
+//   - Supported account types: Accounts in this organizational directory only
+//   - Redirect URI: Single-page application → https://jackson-lab-synapse-targeting-group.github.io/Jackson-lab-antibodies/antibody-tracker.html
+//   Then under API permissions add: Microsoft Graph → Delegated → Files.ReadWrite
+//   Paste the Application (client) ID below.
+const SP_CLIENT_ID   = 'PASTE_AZURE_APP_CLIENT_ID_HERE'; // ← replace this
+const SP_TENANT_ID   = 'imperiallondon.onmicrosoft.com';  // Imperial tenant
+const SP_SITE_HOST   = 'imperiallondon.sharepoint.com';
+const SP_SITE_PATH   = '/sites/Jacksonpapers-WB';
+const SP_DRIVE_PATH  = 'root:/5.Wet lab documents/Antibodies/antibodies.json';
+const GRAPH_BASE     = 'https://graph.microsoft.com/v1.0';
 
-let ghFileSha = null;
+const msalConfig = {
+  auth: {
+    clientId: SP_CLIENT_ID,
+    authority: `https://login.microsoftonline.com/${SP_TENANT_ID}`,
+    redirectUri: location.href.split('?')[0],
+  },
+  cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false },
+};
+const msalScopes = ['Files.ReadWrite', 'Sites.ReadWrite.All'];
 
-function getToken() { return localStorage.getItem(PAT_KEY) || ''; }
+let msalApp = null;
+let msalAccount = null;
 
-function setToken() {
-  const current = getToken();
-  const val = prompt(
-    'Enter your GitHub Personal Access Token (classic).\n\n' +
-    'Create one at: github.com → Settings → Developer settings → Personal access tokens → Tokens (classic)\n' +
-    'Tick the "repo" scope (or just "public_repo" if this is a public repo).\n\n' +
-    'The token is stored only in this browser\'s localStorage and never sent anywhere except GitHub.',
-    current
-  );
-  if (val !== null && val.trim()) {
-    localStorage.setItem(PAT_KEY, val.trim());
-    toast('Token saved');
+async function getMsalApp() {
+  if (msalApp) return msalApp;
+  if (SP_CLIENT_ID === 'PASTE_AZURE_APP_CLIENT_ID_HERE') return null;
+  msalApp = new msal.PublicClientApplication(msalConfig);
+  await msalApp.initialize();
+  // Handle redirect response (needed for first-time popup flow)
+  try { await msalApp.handleRedirectPromise(); } catch(e) {}
+  const accounts = msalApp.getAllAccounts();
+  if (accounts.length) msalAccount = accounts[0];
+  return msalApp;
+}
+
+async function getGraphToken() {
+  const app = await getMsalApp();
+  if (!app) return null;
+  const req = { scopes: msalScopes, account: msalAccount || undefined };
+  try {
+    // Try silent first (user already signed in)
+    const res = await app.acquireTokenSilent(req);
+    msalAccount = res.account;
+    return res.accessToken;
+  } catch(e) {
+    // Fall back to popup (first time or session expired)
+    try {
+      const res = await app.acquireTokenPopup(req);
+      msalAccount = res.account;
+      return res.accessToken;
+    } catch(e2) {
+      console.warn('MSAL auth failed:', e2);
+      return null;
+    }
   }
 }
 
-// ── Load latest data from GitHub (public, no auth needed) ─────────────────
-async function loadFromGitHub() {
+function spDriveUrl() {
+  const siteId = encodeURIComponent(`${SP_SITE_HOST},${SP_SITE_PATH}`);
+  return `${GRAPH_BASE}/sites/${SP_SITE_HOST}:${SP_SITE_PATH}:/drive/${SP_DRIVE_PATH}`;
+}
+
+// ── Load from SharePoint ───────────────────────────────────────────────────
+async function loadFromSharePoint() {
+  showSyncStatus('loading');
+  const token = await getGraphToken();
+  if (!token) {
+    showSyncStatus('no-app');
+    loadFromLocalStorage();
+    return;
+  }
   try {
-    showSyncStatus('loading');
-    const res = await fetch(GH_RAW_URL + '?t=' + Date.now());
+    const res = await fetch(`${GRAPH_BASE}/sites/${SP_SITE_HOST}:${SP_SITE_PATH}:/drive/${SP_DRIVE_PATH}:/content`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (res.status === 404) {
+      // File doesn't exist yet — use seeds, will be created on first save
+      showSyncStatus('no-file');
+      resetToSeeds();
+      return;
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const d = await res.json();
     if (!Array.isArray(d.primary) || !Array.isArray(d.secondary)) throw new Error('Bad shape');
@@ -557,140 +614,54 @@ async function loadFromGitHub() {
     secondaryData = d.secondary;
     mapsData      = Array.isArray(d.maps) && d.maps.length ? d.maps : JSON.parse(JSON.stringify(SEED_MAPS));
     localStorage.setItem('jacksonLabAbs', JSON.stringify({ primary: primaryData, secondary: secondaryData, maps: mapsData }));
-    // Fetch SHA in background so owner can publish later
-    fetchGhSha();
     showSyncStatus('ok');
   } catch(e) {
-    console.warn('GitHub load failed, using local cache:', e);
+    console.warn('SharePoint load failed, using local cache:', e);
     showSyncStatus('offline');
     loadFromLocalStorage();
   }
 }
 
-async function fetchGhSha() {
-  try {
-    const token = getToken();
-    const res = await fetch(GH_API_URL, {
-      headers: token ? { Authorization: `token ${token}` } : {}
-    });
-    if (res.ok) { ghFileSha = (await res.json()).sha; }
-  } catch(e) {}
-}
-
-// ── Publish to GitHub (owner only, needs PAT) ─────────────────────────────
-async function publishToGitHub(data) {
-  let token = getToken();
+// ── Save to SharePoint ─────────────────────────────────────────────────────
+async function saveToSharePoint() {
+  const token = await getGraphToken();
   if (!token) {
-    const val = prompt(
-      'A GitHub token is needed to publish.\n\n' +
-      'Go to: github.com → Settings → Developer settings → Personal access tokens → Tokens (classic)\n' +
-      'Create a token with the "repo" scope and paste it here.\n\n' +
-      'It will be saved in this browser for next time.'
-    );
-    if (!val || !val.trim()) { toast('Publish cancelled — no token', 'error'); return false; }
-    localStorage.setItem(PAT_KEY, val.trim());
-    token = val.trim();
+    showSyncStatus('no-app');
+    toast('Not connected to SharePoint — changes saved locally only', 'error');
+    return;
   }
-
-  const payload = data || { primary: primaryData, secondary: secondaryData, maps: mapsData };
-  const content = btoa(unescape(encodeURIComponent(JSON.stringify(payload, null, 2))));
-  const body = {
-    message: `Update antibody data [${new Date().toISOString().slice(0,16).replace('T',' ')}]`,
-    content,
-    branch: GH_BRANCH,
-  };
-  if (!ghFileSha) await fetchGhSha();
-  if (ghFileSha) body.sha = ghFileSha;
-
   showSyncStatus('saving');
   try {
-    const res = await fetch(GH_API_URL, {
+    const body = JSON.stringify({ primary: primaryData, secondary: secondaryData, maps: mapsData }, null, 2);
+    const res = await fetch(`${GRAPH_BASE}/sites/${SP_SITE_HOST}:${SP_SITE_PATH}:/drive/${SP_DRIVE_PATH}:/content`, {
       method: 'PUT',
-      headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body,
     });
-    if (res.status === 401 || res.status === 403) {
-      localStorage.removeItem(PAT_KEY);
-      toast('Token rejected — please try again with a valid token', 'error');
-      showSyncStatus('auth-error');
-      return false;
-    }
-    if (res.status === 409) {
-      // SHA stale — re-fetch and retry once
-      await fetchGhSha();
-      body.sha = ghFileSha;
-      const res2 = await fetch(GH_API_URL, {
-        method: 'PUT',
-        headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res2.ok) throw new Error('Retry after conflict failed');
-      ghFileSha = (await res2.json()).content.sha;
-      showSyncStatus('ok');
-      toast('Published to GitHub — live for everyone');
-      return true;
-    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    ghFileSha = (await res.json()).content.sha;
     showSyncStatus('ok');
-    toast('Published to GitHub — live for everyone');
-    return true;
+    toast('Saved to SharePoint');
   } catch(e) {
-    console.error('GitHub publish error:', e);
+    console.error('SharePoint save error:', e);
     showSyncStatus('error');
-    toast('Publish failed — check the console for details', 'error');
-    return false;
+    toast('SharePoint save failed — changes kept locally', 'error');
   }
-}
-
-// ── "Share my changes" — teammates export a timestamped JSON file ──────────
-function shareMyChanges() {
-  const payload = JSON.stringify({ primary: primaryData, secondary: secondaryData, maps: mapsData }, null, 2);
-  const date = new Date().toISOString().slice(0,10);
-  download(`antibody-changes-${date}.json`, payload, 'application/json');
-  toast('Changes exported — send this file to the lab manager to publish');
-}
-
-// ── "Load & Publish" — owner loads a teammate's file and pushes it live ───
-function loadAndPublish(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = async e => {
-    try {
-      const d = JSON.parse(e.target.result);
-      if (!d.primary || !d.secondary) throw new Error('Invalid format');
-      if (!confirm(`Load changes from "${file.name}"?\n\nThis will replace the live tracker data for everyone.`)) return;
-      primaryData   = d.primary;
-      secondaryData = d.secondary;
-      if (d.maps) mapsData = d.maps;
-      // Save locally
-      localStorage.setItem('jacksonLabAbs', JSON.stringify({ primary: primaryData, secondary: secondaryData, maps: mapsData }));
-      currentPrimary = [...primaryData];
-      renderPrimary(currentPrimary);
-      renderSecondary(secondaryData);
-      renderMaps();
-      updateStats();
-      // Push to GitHub
-      await publishToGitHub();
-    } catch(err) {
-      toast('Invalid JSON file', 'error');
-    }
-  };
-  reader.readAsText(file);
-  event.target.value = '';
 }
 
 function showSyncStatus(state) {
   const el = document.getElementById('sync-status');
   if (!el) return;
   const map = {
-    loading:    ['⟳ Loading…',              'var(--muted)'],
-    saving:     ['⟳ Publishing…',           'var(--accent)'],
-    ok:         ['✓ Up to date',             'var(--green)'],
-    offline:    ['⚠ Offline — cached data', 'var(--yellow)'],
-    'auth-error':['✕ Token error',           'var(--red)'],
-    error:      ['✕ Sync error',             'var(--red)'],
+    loading:   ['⟳ Loading…',                    'var(--muted)'],
+    saving:    ['⟳ Saving…',                     'var(--accent)'],
+    ok:        ['✓ SharePoint synced',            'var(--green)'],
+    offline:   ['⚠ Offline — cached data',       'var(--yellow)'],
+    'no-file': ['⚠ No data file yet — will create on first save', 'var(--yellow)'],
+    'no-app':  ['⚙ Azure app not configured',    'var(--muted)'],
+    error:     ['✕ Sync error',                  'var(--red)'],
   };
   const [text, color] = map[state] || map.error;
   el.textContent = text;
@@ -849,11 +820,11 @@ function loadFromLocalStorage() {
   resetToSeeds();
 }
 
-// loadState now loads from localStorage immediately (for fast render),
-// then kicks off a GitHub fetch to get the freshest data.
+// loadState loads from localStorage immediately for fast render,
+// then fetches from SharePoint and re-renders with fresh data.
 function loadState() {
   loadFromLocalStorage();
-  loadFromGitHub().then(() => {
+  loadFromSharePoint().then(() => {
     currentPrimary = [...primaryData];
     renderPrimary(currentPrimary);
     renderSecondary(secondaryData);
@@ -870,7 +841,7 @@ function resetToSeeds() {
 }
 
 function saveState() {
-  // Save to localStorage only — changes go live via "Share my changes" / "Load & Publish"
+  // Always save to localStorage immediately as offline fallback
   try {
     localStorage.setItem(DB_KEY, JSON.stringify({
       _version: DB_VERSION,
@@ -879,6 +850,9 @@ function saveState() {
       maps: mapsData
     }));
   } catch(e) {}
+  // Debounce SharePoint saves (avoid rapid calls from e.g. aliquot +/- buttons)
+  clearTimeout(saveState._timer);
+  saveState._timer = setTimeout(() => saveToSharePoint(), 800);
 }
 
 function forceResetToSeeds() {
