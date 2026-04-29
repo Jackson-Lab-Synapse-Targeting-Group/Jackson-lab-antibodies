@@ -389,7 +389,7 @@
   </div>
   <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;margin-left:16px">
     <span id="sync-status" style="font-size:0.75rem;color:var(--muted)">⟳ Loading…</span>
-    <button class="btn" style="padding:4px 10px;font-size:0.72rem" onclick="promptToken();toast('Token saved')" title="Set GitHub Personal Access Token">🔑 Set Token</button>
+    <button class="btn" style="padding:4px 10px;font-size:0.72rem" onclick="setToken()" title="Set GitHub Personal Access Token (lab manager only)">🔑 Set Token</button>
   </div>
 </header>
 
@@ -431,12 +431,11 @@
     <button class="btn" onclick="clearFilters()">Clear</button>
     <button class="btn btn-green" onclick="openAddPrimary()">+ Add Antibody</button>
     <button class="btn btn-yellow" onclick="exportCSV('primary')">↓ CSV</button>
-    <button class="btn" onclick="exportJSON()">↓ Save JSON</button>
-    <label class="btn btn-yellow" style="cursor:pointer" title="Restore a previously saved JSON backup">
-      ↑ Load JSON<input type="file" accept=".json" onchange="importJSON(event)" style="display:none">
+    <button class="btn" onclick="shareMyChanges()" title="Export your changes as a file to send to the lab manager">📤 Share my changes</button>
+    <label class="btn btn-green" style="cursor:pointer" title="Lab manager: load a teammate's changes file and publish live to GitHub">
+      📥 Load &amp; Publish<input type="file" accept=".json" onchange="loadAndPublish(event)" style="display:none">
     </label>
     <button class="btn btn-red" onclick="forceResetToSeeds()" title="Wipe localStorage and reload all original seed data">↺ Restore Seed Data</button>
-    <button class="btn" style="background:#1a1a3a;border-color:#3a3a7a;color:#aaaaff" onclick="exportForWeb()" title="Download index.html with current data baked in, ready to push to GitHub Pages">⬆ Export for Web</button>
     <span class="count-badge" id="primary-count"></span>
   </div>
   <div class="table-wrap">
@@ -515,164 +514,189 @@
 </div>
 
 <script>
-// ── GITHUB SYNC CONFIG ────────────────────────────────────────────────────
-const GH_REPO  = 'jackson-lab-synapse-targeting-group/Jackson-lab-antibodies';
-const GH_BRANCH = 'main';
-const GH_FILE  = 'data/antibodies.json';
+// ── GITHUB SYNC ───────────────────────────────────────────────────────────
+// Anyone can VIEW — data is loaded from the public GitHub raw URL.
+// Only the repo owner needs a token to PUBLISH changes.
+// Teammates use "Share my changes" to export a file; the owner loads it
+// with "Load & Publish" to push it live for everyone.
+const GH_REPO    = 'jackson-lab-synapse-targeting-group/Jackson-lab-antibodies';
+const GH_BRANCH  = 'main';
+const GH_FILE    = 'data/antibodies.json';
 const GH_RAW_URL = `https://raw.githubusercontent.com/${GH_REPO}/${GH_BRANCH}/${GH_FILE}`;
 const GH_API_URL = `https://api.github.com/repos/${GH_REPO}/contents/${GH_FILE}`;
-const PAT_KEY  = 'jacksonLabGHToken';
+const PAT_KEY    = 'jacksonLabGHToken';
 
-function getToken() {
-  return localStorage.getItem(PAT_KEY) || '';
-}
+let ghFileSha = null;
 
-function promptToken() {
+function getToken() { return localStorage.getItem(PAT_KEY) || ''; }
+
+function setToken() {
   const current = getToken();
   const val = prompt(
-    'Enter your GitHub Personal Access Token (PAT) with Contents write access.\n\n' +
-    'Create one at: github.com → Settings → Developer Settings → Personal access tokens → Fine-grained tokens\n' +
-    'Required permission: Repository > Contents > Read and Write\n\n' +
-    'The token is stored only in this browser\'s localStorage.',
+    'Enter your GitHub Personal Access Token (classic).\n\n' +
+    'Create one at: github.com → Settings → Developer settings → Personal access tokens → Tokens (classic)\n' +
+    'Tick the "repo" scope (or just "public_repo" if this is a public repo).\n\n' +
+    'The token is stored only in this browser\'s localStorage and never sent anywhere except GitHub.',
     current
   );
-  if (val !== null) {
+  if (val !== null && val.trim()) {
     localStorage.setItem(PAT_KEY, val.trim());
-    return val.trim();
+    toast('Token saved');
   }
-  return current;
 }
 
-let ghFileSha = null; // tracks current SHA for update commits
-
+// ── Load latest data from GitHub (public, no auth needed) ─────────────────
 async function loadFromGitHub() {
   try {
     showSyncStatus('loading');
-    // Add cache-busting timestamp to always get latest
     const res = await fetch(GH_RAW_URL + '?t=' + Date.now());
-    if (!res.ok) {
-      if (res.status === 404) {
-        // File doesn't exist yet — use seeds and create it on first save
-        showSyncStatus('no-file');
-        resetToSeeds();
-        return;
-      }
-      throw new Error(`HTTP ${res.status}`);
-    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const d = await res.json();
-    // Also fetch the SHA we'll need to update the file
-    const apiRes = await fetch(GH_API_URL, {
-      headers: getToken() ? { Authorization: `token ${getToken()}` } : {}
-    });
-    if (apiRes.ok) {
-      const meta = await apiRes.json();
-      ghFileSha = meta.sha;
-    }
-    const hasPrimary   = Array.isArray(d.primary)   && d.primary.length   > 0;
-    const hasSecondary = Array.isArray(d.secondary) && d.secondary.length > 0;
-    if (hasPrimary && hasSecondary) {
-      primaryData   = d.primary.map(r => ({ aliquots: null, ...r }));
-      secondaryData = d.secondary;
-      mapsData      = (Array.isArray(d.maps) && d.maps.length > 0)
-                        ? d.maps
-                        : JSON.parse(JSON.stringify(SEED_MAPS));
-      // Also mirror to localStorage as offline fallback
-      localStorage.setItem('jacksonLabAbs', JSON.stringify({ primary: primaryData, secondary: secondaryData, maps: mapsData }));
-      showSyncStatus('ok');
-      return;
-    }
-    throw new Error('Unexpected data shape');
+    if (!Array.isArray(d.primary) || !Array.isArray(d.secondary)) throw new Error('Bad shape');
+    primaryData   = d.primary.map(r => ({ aliquots: null, ...r }));
+    secondaryData = d.secondary;
+    mapsData      = Array.isArray(d.maps) && d.maps.length ? d.maps : JSON.parse(JSON.stringify(SEED_MAPS));
+    localStorage.setItem('jacksonLabAbs', JSON.stringify({ primary: primaryData, secondary: secondaryData, maps: mapsData }));
+    // Fetch SHA in background so owner can publish later
+    fetchGhSha();
+    showSyncStatus('ok');
   } catch(e) {
-    console.warn('GitHub load failed, falling back to localStorage:', e);
+    console.warn('GitHub load failed, using local cache:', e);
     showSyncStatus('offline');
     loadFromLocalStorage();
   }
 }
 
-async function saveToGitHub(retryWithNewToken) {
+async function fetchGhSha() {
+  try {
+    const token = getToken();
+    const res = await fetch(GH_API_URL, {
+      headers: token ? { Authorization: `token ${token}` } : {}
+    });
+    if (res.ok) { ghFileSha = (await res.json()).sha; }
+  } catch(e) {}
+}
+
+// ── Publish to GitHub (owner only, needs PAT) ─────────────────────────────
+async function publishToGitHub(data) {
   let token = getToken();
   if (!token) {
-    token = promptToken();
-    if (!token) { toast('Save cancelled — no token provided', 'error'); return; }
+    const val = prompt(
+      'A GitHub token is needed to publish.\n\n' +
+      'Go to: github.com → Settings → Developer settings → Personal access tokens → Tokens (classic)\n' +
+      'Create a token with the "repo" scope and paste it here.\n\n' +
+      'It will be saved in this browser for next time.'
+    );
+    if (!val || !val.trim()) { toast('Publish cancelled — no token', 'error'); return false; }
+    localStorage.setItem(PAT_KEY, val.trim());
+    token = val.trim();
   }
 
-  const payload = { primary: primaryData, secondary: secondaryData, maps: mapsData };
+  const payload = data || { primary: primaryData, secondary: secondaryData, maps: mapsData };
   const content = btoa(unescape(encodeURIComponent(JSON.stringify(payload, null, 2))));
   const body = {
-    message: `Update antibody data [${new Date().toISOString().slice(0,19).replace('T',' ')}]`,
+    message: `Update antibody data [${new Date().toISOString().slice(0,16).replace('T',' ')}]`,
     content,
     branch: GH_BRANCH,
   };
+  if (!ghFileSha) await fetchGhSha();
   if (ghFileSha) body.sha = ghFileSha;
 
   showSyncStatus('saving');
   try {
     const res = await fetch(GH_API_URL, {
       method: 'PUT',
-      headers: {
-        Authorization: `token ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     if (res.status === 401 || res.status === 403) {
-      const retry = confirm('GitHub token rejected. Would you like to enter a new token and try again?');
-      if (retry) {
-        promptToken();
-        await saveToGitHub(true);
-      } else {
-        showSyncStatus('auth-error');
-        toast('GitHub save failed — invalid token', 'error');
-      }
-      return;
+      localStorage.removeItem(PAT_KEY);
+      toast('Token rejected — please try again with a valid token', 'error');
+      showSyncStatus('auth-error');
+      return false;
     }
     if (res.status === 409) {
-      // Conflict — file was updated by someone else; re-fetch SHA and retry
-      toast('Sync conflict detected — refreshing and retrying…', 'error');
-      const apiRes = await fetch(GH_API_URL, { headers: { Authorization: `token ${token}` } });
-      if (apiRes.ok) { const meta = await apiRes.json(); ghFileSha = meta.sha; body.sha = ghFileSha; }
+      // SHA stale — re-fetch and retry once
+      await fetchGhSha();
+      body.sha = ghFileSha;
       const res2 = await fetch(GH_API_URL, {
         method: 'PUT',
         headers: { Authorization: `token ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (!res2.ok) throw new Error(`Retry failed: ${res2.status}`);
-      const d2 = await res2.json();
-      ghFileSha = d2.content.sha;
+      if (!res2.ok) throw new Error('Retry after conflict failed');
+      ghFileSha = (await res2.json()).content.sha;
       showSyncStatus('ok');
-      toast('Saved to GitHub');
-      return;
+      toast('Published to GitHub — live for everyone');
+      return true;
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const d = await res.json();
-    ghFileSha = d.content.sha;
+    ghFileSha = (await res.json()).content.sha;
     showSyncStatus('ok');
-    toast('Saved to GitHub');
+    toast('Published to GitHub — live for everyone');
+    return true;
   } catch(e) {
-    console.error('GitHub save error:', e);
+    console.error('GitHub publish error:', e);
     showSyncStatus('error');
-    toast('GitHub save failed — check console', 'error');
+    toast('Publish failed — check the console for details', 'error');
+    return false;
   }
+}
+
+// ── "Share my changes" — teammates export a timestamped JSON file ──────────
+function shareMyChanges() {
+  const payload = JSON.stringify({ primary: primaryData, secondary: secondaryData, maps: mapsData }, null, 2);
+  const date = new Date().toISOString().slice(0,10);
+  download(`antibody-changes-${date}.json`, payload, 'application/json');
+  toast('Changes exported — send this file to the lab manager to publish');
+}
+
+// ── "Load & Publish" — owner loads a teammate's file and pushes it live ───
+function loadAndPublish(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async e => {
+    try {
+      const d = JSON.parse(e.target.result);
+      if (!d.primary || !d.secondary) throw new Error('Invalid format');
+      if (!confirm(`Load changes from "${file.name}"?\n\nThis will replace the live tracker data for everyone.`)) return;
+      primaryData   = d.primary;
+      secondaryData = d.secondary;
+      if (d.maps) mapsData = d.maps;
+      // Save locally
+      localStorage.setItem('jacksonLabAbs', JSON.stringify({ primary: primaryData, secondary: secondaryData, maps: mapsData }));
+      currentPrimary = [...primaryData];
+      renderPrimary(currentPrimary);
+      renderSecondary(secondaryData);
+      renderMaps();
+      updateStats();
+      // Push to GitHub
+      await publishToGitHub();
+    } catch(err) {
+      toast('Invalid JSON file', 'error');
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
 }
 
 function showSyncStatus(state) {
   const el = document.getElementById('sync-status');
   if (!el) return;
-  const states = {
-    'loading':    { text: '⟳ Loading from GitHub…', color: 'var(--muted)' },
-    'saving':     { text: '⟳ Saving to GitHub…',   color: 'var(--accent)' },
-    'ok':         { text: '✓ GitHub synced',         color: 'var(--green)' },
-    'offline':    { text: '⚠ Offline — using local cache', color: 'var(--yellow)' },
-    'no-file':    { text: '⚠ No remote data yet — will create on first save', color: 'var(--yellow)' },
-    'auth-error': { text: '✕ Auth error — click 🔑 to set token', color: 'var(--red)' },
-    'error':      { text: '✕ Sync error',            color: 'var(--red)' },
+  const map = {
+    loading:    ['⟳ Loading…',              'var(--muted)'],
+    saving:     ['⟳ Publishing…',           'var(--accent)'],
+    ok:         ['✓ Up to date',             'var(--green)'],
+    offline:    ['⚠ Offline — cached data', 'var(--yellow)'],
+    'auth-error':['✕ Token error',           'var(--red)'],
+    error:      ['✕ Sync error',             'var(--red)'],
   };
-  const s = states[state] || states['error'];
-  el.textContent = s.text;
-  el.style.color = s.color;
+  const [text, color] = map[state] || map.error;
+  el.textContent = text;
+  el.style.color = color;
 }
-
-// ─────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────
 // SEED DATA
@@ -846,7 +870,7 @@ function resetToSeeds() {
 }
 
 function saveState() {
-  // Always mirror to localStorage as offline fallback
+  // Save to localStorage only — changes go live via "Share my changes" / "Load & Publish"
   try {
     localStorage.setItem(DB_KEY, JSON.stringify({
       _version: DB_VERSION,
@@ -855,9 +879,6 @@ function saveState() {
       maps: mapsData
     }));
   } catch(e) {}
-  // Debounce GitHub saves to avoid hammering API on rapid changes (e.g. aliquot buttons)
-  clearTimeout(saveState._timer);
-  saveState._timer = setTimeout(() => saveToGitHub(), 800);
 }
 
 function forceResetToSeeds() {
@@ -869,8 +890,7 @@ function forceResetToSeeds() {
   renderSecondary(secondaryData);
   renderMaps();
   updateStats();
-  toast('Restored to seed data — saving to GitHub…');
-  saveToGitHub();
+  toast('Restored to seed data');
 }
 
 let primaryData = [], secondaryData = [], mapsData = [];
